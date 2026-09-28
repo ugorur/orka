@@ -44,23 +44,26 @@ if [ ! -d "$wt" ]; then
   mkdir -p "$(dirname "$wt")"
   git -C "$project" worktree add -q -b "orka/$card" "$wt" HEAD || die "could not create worktree $wt"
 fi
-wt=$(cd "$wt" && pwd -P)
-# Workers run unrestricted: only ever inside a linked worktree of this repository.
-common() { (cd "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P); }
-[ -n "$(common "$wt")" ] && [ "$(common "$wt")" = "$(common "$project")" ] || die "$wt is not a worktree of $project"
-[ "$(git -C "$wt" rev-parse --show-toplevel)" != "$(cd "$project" && pwd -P)" ] || die "refusing to run a worker in the main checkout"
+# Workers run unrestricted: only ever at the root of a linked (non-main) worktree of this repository.
+real() { (cd "$1" 2>/dev/null && pwd -P); }
+wt=$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null) && wt=$(real "$wt") || die "$wt is not inside a git worktree"
+gitdir() { real "$(git -C "$1" rev-parse --path-format=absolute "$2" 2>/dev/null)"; }
+[ "$(gitdir "$wt" --git-common-dir)" = "$(gitdir "$project" --git-common-dir)" ] || die "$wt is not a worktree of $project"
+[ "$(gitdir "$wt" --git-dir)" != "$(gitdir "$wt" --git-common-dir)" ] || die "refusing to run a worker in the main checkout ($wt)"
 
-# One worker per worktree at a time (mkdir is atomic; a lock whose owner died is taken over).
+# One worker per worktree at a time. The lock is a symlink whose target is the owner's pid:
+# creating it is atomic and publishes the owner in the same step; only the owner removes it.
+# ponytail: two runners reclaiming the same dead lock at the same instant can still race; rare
+# (needs a crashed runner plus two simultaneous restarts), fix with a reclaim lock if it ever bites.
 lock="$orka/runs/.locks/$(printf '%s' "$wt" | tr '/ ' '__')"
 mkdir -p "$orka/runs/.locks"
-if ! mkdir "$lock" 2>/dev/null; then
-  owner=$(cat "$lock/pid" 2>/dev/null)
+if ! ln -s "$$" "$lock" 2>/dev/null; then
+  owner=$(readlink "$lock" 2>/dev/null)
   if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then die "a worker (pid $owner) is already running in $wt"; fi
-  rm -rf "$lock"; mkdir "$lock" || die "could not lock $wt"
+  rm -f "$lock"; ln -s "$$" "$lock" 2>/dev/null || die "could not lock $wt"
 fi
-echo $$ > "$lock/pid"
 a=
-trap 'rm -rf "$lock"; [ -n "$a" ] && rm -f "$a/running"' EXIT
+trap '[ "$(readlink "$lock" 2>/dev/null)" = $$ ] && rm -f "$lock"; [ -n "$a" ] && rm -f "$a/running"' EXIT
 
 out="$orka/runs/$card"
 mkdir -p "$out"
@@ -94,25 +97,29 @@ before=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 ORKA_WT=$wt ORKA_MODEL=$model ORKA_EFFORT=$effort ORKA_PROMPT="$a/prompt.md" ORKA_OUT=$a \
   "$tbin" --kill-after=60 "${timeout_min}m" bash "$adapter" < /dev/null 2> "$a/err.txt" &
 wpid=$!
-trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
 stopped=0
-wait $wpid; rc=$?
-if [ $stopped = 1 ]; then wait $wpid; r=$?; [ $r -ne 127 ] && rc=$r; fi
+trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
+# A signal interrupts `wait`; keep waiting until the worker group is really gone.
+while :; do wait $wpid; rc=$?; kill -0 $wpid 2>/dev/null || break; done
+[ $stopped = 1 ] && [ $rc -eq 0 ] && rc=143   # a cancelled run never counts as success
 end=$(date +%s)
 after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)
 usage=null
-jq -e 'type == "object"' "$a/usage.json" >/dev/null 2>&1 && usage=$(cat "$a/usage.json")
+jq -se 'length == 1 and (.[0] | type == "object")' "$a/usage.json" >/dev/null 2>&1 && usage=$(jq -c '.' "$a/usage.json")
 jq -n --arg card "$card" --arg cliv "$cliv" --arg role "$role" --arg cli "$cli" --arg model "$model" --arg effort "$effort" \
   --arg wt "$wt" --arg base "$before" --arg head "$after" --argjson attempt "$n" --argjson rc "$rc" --argjson seconds $((end - start)) \
   --argjson started "$start" --argjson commits "${commits:-0}" --argjson usage "$usage" --argjson stopped "$stopped" \
   '{card:$card, role:$role, cli:$cli, cliVersion:$cliv, model:$model, effort:$effort, attempt:$attempt, rc:$rc,
     timedOut:($stopped == 0 and ($rc == 124 or $rc == 137)), stopped:($stopped == 1), seconds:$seconds, started:$started,
-    commits:$commits, worktree:$wt, base:$base, head:$head, usage:$usage}' > "$a/meta.tmp" && mv "$a/meta.tmp" "$a/meta.json"
+    commits:$commits, worktree:$wt, base:$base, head:$head, usage:$usage}' > "$a/meta.tmp" && mv "$a/meta.tmp" "$a/meta.json" \
+  || { echo "orka: could not write $a/meta.json" >&2; [ "$rc" -eq 0 ] && rc=70; }
 # The orchestrator reads reports; mask obvious secrets a worker may have echoed.
 # ponytail: pattern-based, catches KEY=value / Bearer / sk- style only; not a DLP.
 [ -f "$a/report.txt" ] && sed -E \
-  -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*["'\'']?)[^[:space:]"'\'']+/\1***/g' \
+  -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)"[^"]*"/\1"***"/g' \
+  -e "s/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)'[^']*'/\\1'***'/g" \
+  -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]"'\'']+/\1***/g' \
   -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]+/\1***/g' \
   -e 's/(sk|pk|xai)-[A-Za-z0-9_-]{12,}/\1-***/g' \
   -e 's/gh[pousr]_[A-Za-z0-9]{20,}/gh*_***/g' "$a/report.txt" > "$a/report.tmp" && mv "$a/report.tmp" "$a/report.txt"

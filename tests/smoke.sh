@@ -48,9 +48,9 @@ grep -q "model=m-x effort=medium" .orka/runs/c01-hello/attempt-2/report.txt || f
 ok "explicit override + attempt numbering"
 
 printf '# Card c02\nleak\n' > .orka/tasks/c02-leak.md
-ORKA_FAKE_LEAK='OPENAI_API_KEY=sk-abcdefghijklmnop1234 and Bearer abc.def.ghi FIXTURE_API_KEY="quotedsecret1" DB_PASSWORD='"'"'single1'"'"'' \
+ORKA_FAKE_LEAK='OPENAI_API_KEY=sk-abcdefghijklmnop1234 and Bearer abc.def.ghi FIXTURE_API_KEY="quotedsecret1 tail1" DB_PASSWORD='"'"'single1 tail2'"'"'' \
   .orka/bin/orka run c02-leak junior > /dev/null
-grep -q 'sk-abcdefghijklmnop1234\|abc.def.ghi\|quotedsecret1\|single1' .orka/runs/c02-leak/attempt-1/report.txt && fail "secret not redacted: $(cat .orka/runs/c02-leak/attempt-1/report.txt)"
+grep -q 'sk-abcdefghijklmnop1234\|abc.def.ghi\|quotedsecret1\|single1\|tail1\|tail2' .orka/runs/c02-leak/attempt-1/report.txt && fail "secret not redacted: $(cat .orka/runs/c02-leak/attempt-1/report.txt)"
 ok "report redaction"
 
 printf '# Card c03\nslow\n' > .orka/tasks/c03-slow.md
@@ -101,15 +101,28 @@ for _ in $(seq 1 50); do [ -f .orka/runs/c04-long/attempt-1/running ] && grep -q
 sleep 1
 .orka/bin/orka status c04-long | grep -q "c04-long .*running" || fail "status does not show a running card"
 .orka/bin/orka run c04-long junior > /dev/null 2>&1 && fail "second worker allowed in a busy worktree"
-kill -TERM $runner; wait $runner
+mkdir -p "$tmp/app-wt/c04-long/sub"
+.orka/bin/orka run c04-long junior "$tmp/app-wt/c04-long/sub" > /dev/null 2>&1 && fail "a subdirectory bypassed the worktree lock"
+kill -TERM $runner; sleep 0.3; kill -TERM $runner 2>/dev/null; wait $runner
 jq -e '.stopped == true and .timedOut == false' .orka/runs/c04-long/attempt-1/meta.json > /dev/null || fail "stop not recorded: $(cat .orka/runs/c04-long/attempt-1/meta.json)"
 pgrep -f "^sleep 37$" > /dev/null && fail "worker survived its stopped runner"
 [ ! -e .orka/runs/c04-long/attempt-1/running ] || fail "running marker left after stop"
-ok "running status, one worker per worktree, stop kills the worker"
+ok "running status, one worker per worktree, stop (even twice) kills the worker"
+
+printf '# Card c07\ntrap\n' > .orka/tasks/c07-trap.md
+ORKA_FAKE_TRAP=1 ORKA_FAKE_SLEEP=37 .orka/bin/orka run c07-trap junior > /dev/null 2>&1 &
+runner=$!
+for _ in $(seq 1 50); do grep -qs . .orka/runs/c07-trap/attempt-1/running && break; sleep 0.2; done
+sleep 1; kill -TERM $runner; wait $runner && fail "a cancelled run exited 0"
+ok "a cancelled run is never a success"
 
 printf '# Card c05\nbad usage\n' > .orka/tasks/c05-usage.md
-ORKA_FAKE_BADUSAGE=1 .orka/bin/orka run c05-usage junior > /dev/null || fail "run with bad usage.json"
-jq -e '.usage == null and .rc == 0' .orka/runs/c05-usage/attempt-1/meta.json > /dev/null || fail "bad usage.json broke meta.json"
+i=0
+for bad in 'not json' '{}\n{}' '1\n{}'; do
+  i=$((i + 1))
+  ORKA_FAKE_BADUSAGE=$bad .orka/bin/orka run c05-usage junior > /dev/null || fail "run with bad usage.json '$bad'"
+  jq -e '.usage == null and .rc == 0' .orka/runs/c05-usage/attempt-$i/meta.json > /dev/null || fail "bad usage.json '$bad' broke meta.json"
+done
 ok "invalid usage.json does not break meta.json"
 
 printf '# Card c06\nfails\n' > .orka/tasks/c06-fails.md
@@ -129,11 +142,12 @@ set -- .orka/runs/*-par; [ $# = 4 ] || fail "not all queued jobs ran"
 ok "two queues share the parallel limit"
 
 h="$tmp/home"
-mkdir -p "$h/.agents/skills/orka" && echo mine > "$h/.agents/skills/orka/notes.txt"
+mkdir -p "$h/.agents/skills/orka" "$h/.agents/skills/orka.new" "$h/.agents/skills/orka.old" && echo mine > "$h/.agents/skills/orka/notes.txt"
 HOME=$h bash "$repo/install.sh" > /dev/null 2>&1 && fail "installer replaced a directory it does not own"
 [ -f "$h/.agents/skills/orka/notes.txt" ] || fail "installer deleted user files"
 rm -rf "$h/.agents/skills/orka"
 HOME=$h bash "$repo/install.sh" > /dev/null && HOME=$h bash "$repo/install.sh" > /dev/null || fail "install / re-install"
+[ -d "$h/.agents/skills/orka.new" ] && [ -d "$h/.agents/skills/orka.old" ] || fail "installer removed sibling directories it did not create"
 [ -f "$h/.agents/skills/orka/SKILL.md" ] && [ -L "$h/.claude/skills/orka" ] || fail "install layout"
 ok "installer: owns only what it installed, re-install works"
 

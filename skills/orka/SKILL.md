@@ -63,7 +63,7 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 ## 2 · Rules that cost us real money to learn
 
 1. **Done = the user's words, everywhere they apply.** Not the developer's checklist, not one example page. In one project only ~10% of "fixed" items passed the owner's own re-check.
-2. **Author and reviewer are different models.** A cheap strong lead found majors in 2–3 minutes that the senior's passing tests missed — the best-value runs in the whole ledger.
+2. **Author and reviewer are different models.** 15 of 16 first-round lead reviews asked for changes the author's passing tests had missed, in about 4 minutes each — the best-value runs in the whole ledger.
 3. **Tests must use real data shapes.** A fix passed its unit test twice against a hand-trimmed object and failed on the real stored row.
 4. **UI changed = seen in a headless browser, with screenshots.** A shipped main button was broken by CSP while every test passed.
 5. **No mocks, no fake success, no borrowed credentials.** Missing provider or key → the worker stops and reports.

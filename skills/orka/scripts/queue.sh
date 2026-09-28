@@ -18,17 +18,18 @@ running() {
   done
   echo $c
 }
-# Only one queue at a time may count free slots and launch (mkdir is atomic).
+# Only one queue at a time may count free slots and launch. The lock is a symlink to the owner's
+# pid (atomic create + publish); a dead owner's lock is reclaimed, only the owner releases it.
+# ponytail: two queues reclaiming the same dead lock at the same instant can still race; rare.
 take_lock() {
   local owner
-  until mkdir "$lock" 2>/dev/null; do
-    owner=$(cat "$lock/pid" 2>/dev/null)
-    [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null && rm -rf "$lock"
-    sleep 2
+  until ln -s "$$" "$lock" 2>/dev/null; do
+    owner=$(readlink "$lock" 2>/dev/null)
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -f "$lock"; else sleep 2; fi
   done
-  echo $$ > "$lock/pid"
 }
-trap '[ "$(cat "$lock/pid" 2>/dev/null)" = $$ ] && rm -rf "$lock"' EXIT
+release_lock() { [ "$(readlink "$lock" 2>/dev/null)" = $$ ] && rm -f "$lock"; }
+trap release_lock EXIT
 pids=()
 for job in "$@"; do
   read -ra argv <<< "$job"
@@ -40,7 +41,7 @@ for job in "$@"; do
   pids+=("$p")
   # Keep the lock until this run has claimed its slot (or already exited).
   while kill -0 "$p" 2>/dev/null && ! grep -qs "^$p " "$orka"/runs/*/attempt-*/running; do sleep 1; done
-  rm -rf "$lock"
+  release_lock
 done
 failed=0
 for p in "${pids[@]}"; do wait "$p" || failed=$((failed + 1)); done

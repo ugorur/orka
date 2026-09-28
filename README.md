@@ -23,11 +23,11 @@ Your strongest agent is also your most expensive, and its context and quota run 
 "Prompt + `git worktree`" is the easy part. What Orka adds are the rules that made it work on real projects:
 
 - **A different model reviews every critical change** before merge.
-- **The orchestrator re-runs the acceptance itself.** A worker's report is a claim, and `commits: 0` is a failed delivery.
+- **The orchestrator re-runs the acceptance itself.** A worker's report is a claim, and an implementation card with `commits: 0` delivered nothing.
 - **QA checks against your original words,** not the developer's checklist.
 - **Every run is logged and scored,** so the next assignment is based on how each worker actually did.
 
-These came from **216 worker runs (169 cards, 67 worker-hours)** on two private production projects, where Claude Code orchestrated Codex and Grok. The anonymized numbers are in [docs/evidence.md](docs/evidence.md).
+These came from **217 worker runs (170 cards, 67 worker-hours)** on two private production projects, where Claude Code orchestrated Codex and Grok. The anonymized numbers are in [docs/evidence.md](docs/evidence.md).
 
 A session, shortened (a *card* is one task file for one worker; `c03r` is the lead's review of card `c03`):
 
@@ -50,7 +50,7 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
 ## Why
 
 - **Tokens and quota.** One strong model managing four cheaper ones gets through a lot more work before anything runs out. The orchestrator reads diffs and reports, not the whole codebase.
-- **A second model finds what the author can't.** In our ledger, **every first-round lead review (9 of 9) found at least one real bug that the author's own passing tests had missed**: a data-loss regression, a session-replay window, a double-order race. The median review took under 4 minutes ([the list](docs/evidence.md#the-9-first-round-lead-reviews)).
+- **A second model finds what the author can't.** **15 of 16 first-round lead reviews came back REQUEST CHANGES**, each time for real problems that had got past the author's own passing tests: a data-loss regression, a session-replay window, a double-order race. The median review took about 4 minutes ([details](docs/evidence.md#first-round-lead-reviews)).
 - **Parallel, isolated work.** Each card runs in its own git worktree and branch, with its own database, ports and browser session if you want them. Workers never step on each other or on your checkout.
 - **A ledger instead of a gut feeling.** Every run gets a predicted and an actual score (smart / dumb / speed / cost) in `ledger.jsonl`. The skill tells the orchestrator to read the per-worker averages before it assigns the next card. Nothing is trained; it's a log the next session actually reads, and the orchestrator's own mistakes go into it too.
 
@@ -177,13 +177,13 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 
 (`orka` = `.orka/bin/orka`.)
 
-## What 216 runs taught us
+## What 217 runs taught us
 
 These are written into the skill as rules. Each one is here because we paid for it once:
 
 1. **"Done" means the user's words, everywhere they apply.** When QA checked against the developers' own checklists, the owner's re-check found only about 10% of the items truly done. QA now checks against the original request.
 2. **Author and reviewer must be different models.** It is the cheapest insurance in the whole setup.
-3. **A worker's "done" is a claim.** The orchestrator re-runs the acceptance in the worktree. `commits: 0` means nothing was delivered, whatever the report says.
+3. **A worker's "done" is a claim.** The orchestrator re-runs the acceptance in the worktree. An implementation card with `commits: 0` delivered nothing, whatever the report says.
 4. **Tests must use real data shapes.** One fix passed its unit test twice against a hand-made object and still failed on the real stored row. A junior's browser QA caught it.
 5. **UI changed = seen in a headless browser.** A main button shipped broken (blocked by CSP) while every test was green.
 6. **Isolate everything:** worktree, database, ports, cache index, browser session. Never the user's browser, never a shared container. Kill processes by PID only.
@@ -219,7 +219,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 **Do I need Claude Code?** No. Any harness that can read `SKILL.md` and run bash can be the orchestrator, and any CLI with an adapter can be a worker. Our production runs happened to use Claude Code → Codex + Grok.
 
-**What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, 2–5 minutes and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok mid card, $1.50–$5. `orka score --summary` shows your own numbers.
+**What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, 2–5 minutes and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok mid card, $1.50–$9.35 (median $3.70). `orka score --summary` shows your own numbers.
 
 **Is this a framework?** No. It's a skill (a markdown playbook) plus about 300 lines of bash. No daemon, no server, no database, no Node/Python runtime.
 

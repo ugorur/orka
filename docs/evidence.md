@@ -9,12 +9,12 @@ In both, **Claude Code (Opus) was the orchestrator** and **Codex CLI and Grok CL
 
 ## Runs
 
-**216 worker runs · 169 task cards · 67 worker-hours · 9 non-zero exits.**
+**217 worker runs · 170 task cards · 67 worker-hours · 10 non-zero exits.** (Counted from every `meta.json` the two runners wrote.)
 
 | Worker / model (Sep 2026 ids) | Runs | Non-zero exit | Median minutes | Used as |
 |---|---:|---:|---:|---|
 | codex / gpt-6-luna | 68 | 6 | 10 | junior: QA, research, simple fixes |
-| grok / grok-4.7 | 40 | 0 | 24 | mid: development |
+| grok / grok-4.7 | 41 | 1 | 23 | mid: development |
 | codex / gpt-6-astra | 38 | 1 | 4 | lead: reviews |
 | codex / gpt-6-sol | 31 | 2 | 27 | senior |
 | codex / gpt-5.6-terra | 25 | 0 | 19 | mid / sub-worker |
@@ -38,9 +38,11 @@ A non-zero exit is not the same as bad work. Most bad work exited 0 and was caug
 
 These are one orchestrator's judgements, not a benchmark. They were good enough to steer assignment: Astra became the default reviewer, Luna was kept on QA and research, and Grok took over development when Codex quota ran low.
 
-## The 9 first-round lead reviews
+## First-round lead reviews
 
-Every first-round review by the lead found at least one real problem that the author's own passing tests had missed. Median time: 3 min 22 s.
+Project A had **16 first-round lead reviews** (the lead's first look at a branch whose author reported builds and tests passing). **15 came back REQUEST CHANGES; 1 was APPROVE WITH NITS.** Median time: about 4 minutes (fastest 1:25, slowest 12:41).
+
+The 9 below are the ones scored in the ledger, with what the lead found:
 
 | Review of | Time | What the lead found |
 |---|---:|---|
@@ -54,7 +56,7 @@ Every first-round review by the lead found at least one real problem that the au
 | Refund / renewal flow | 4:35 | Pending refund cut access early; refund not bound to the payment that funded it (reproduced) |
 | Payment callback hardening | 3:57 | A placeholder IP in refunds; unconditional `X-Forwarded-For` trust; a repair script that ran on import |
 
-Most of these went through 2–4 review rounds until APPROVE. The re-reviews mostly confirmed the fixes, and several found one more issue.
+Most of these branches went through 2–4 review rounds until APPROVE. The re-reviews mostly confirmed the fixes, and several found one more issue.
 
 ## Incidents behind the rules
 

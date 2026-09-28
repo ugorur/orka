@@ -19,9 +19,19 @@ else
 fi
 
 dest="$HOME/.agents/skills/orka"
+if [ -e "$dest" ] && [ ! -f "$dest/.orka-installed" ]; then
+  echo "orka: $dest exists but was not installed by this script; move it away and re-run" >&2
+  exit 1
+fi
+# Stage next to the destination, then swap, so a failed copy never leaves a half-installed skill.
 mkdir -p "$(dirname "$dest")"
-rm -rf "$dest"
-cp -R "$src" "$dest"
+rm -rf "$dest.new"
+cp -R "$src" "$dest.new"
+date -u +%FT%TZ > "$dest.new/.orka-installed"
+rm -rf "$dest.old"
+[ -e "$dest" ] && mv "$dest" "$dest.old"
+mv "$dest.new" "$dest"
+rm -rf "$dest.old"
 echo "installed  $dest"
 
 link() { # link <skills dir> <harness>

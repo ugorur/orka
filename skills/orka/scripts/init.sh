@@ -12,7 +12,7 @@ project=$(git -C "${1:-.}" rev-parse --show-toplevel 2>/dev/null) || die "not a 
 orka="$project/.orka"
 
 for f in "$orka"/runs/*/attempt-*/running; do
-  [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null && die "a worker is running ($f); update .orka/bin after it finishes"
+  [ -f "$f" ] && read -r pid _ < "$f" && kill -0 "$pid" 2>/dev/null && die "a worker is running ($f); update .orka/bin after it finishes"
 done
 
 mkdir -p "$orka"/{bin/workers,tasks,runs,env,templates}

@@ -48,8 +48,9 @@ grep -q "model=m-x effort=medium" .orka/runs/c01-hello/attempt-2/report.txt || f
 ok "explicit override + attempt numbering"
 
 printf '# Card c02\nleak\n' > .orka/tasks/c02-leak.md
-ORKA_FAKE_LEAK='OPENAI_API_KEY=sk-abcdefghijklmnop1234 and Bearer abc.def.ghi' .orka/bin/orka run c02-leak junior > /dev/null
-grep -q 'sk-abcdefghijklmnop1234\|abc.def.ghi' .orka/runs/c02-leak/attempt-1/report.txt && fail "secret not redacted"
+ORKA_FAKE_LEAK='OPENAI_API_KEY=sk-abcdefghijklmnop1234 and Bearer abc.def.ghi FIXTURE_API_KEY="quotedsecret1" DB_PASSWORD='"'"'single1'"'"'' \
+  .orka/bin/orka run c02-leak junior > /dev/null
+grep -q 'sk-abcdefghijklmnop1234\|abc.def.ghi\|quotedsecret1\|single1' .orka/runs/c02-leak/attempt-1/report.txt && fail "secret not redacted: $(cat .orka/runs/c02-leak/attempt-1/report.txt)"
 ok "report redaction"
 
 printf '# Card c03\nslow\n' > .orka/tasks/c03-slow.md
@@ -81,5 +82,59 @@ bash "$repo/skills/orka/scripts/init.sh" "$proj" > "$tmp/init2.out" || fail "re-
 grep -q "senior: fake m-senior" "$tmp/init2.out" && [ -s .orka/ledger.jsonl ] || fail "re-init lost state"
 [ -x .orka/bin/workers/fake.sh ] || fail "re-init removed a custom adapter"
 ok "re-init keeps team, ledger and custom adapters"
+
+# --- Guards found by the lead review -------------------------------------------------------
+.orka/bin/orka run c01-hello senior "$proj" > /dev/null 2>&1 && fail "ran a worker in the main checkout"
+mkdir -p "$tmp/not-a-worktree"
+.orka/bin/orka run c01-hello senior "$tmp/not-a-worktree" > /dev/null 2>&1 && fail "ran a worker outside a worktree"
+ok "refuses main checkout and foreign directories"
+
+rm -rf .orka/runs/c01-hello/attempt-1
+.orka/bin/orka run c01-hello senior > /dev/null || fail "run after deleting an old attempt"
+[ -d .orka/runs/c01-hello/attempt-3 ] && [ -f .orka/runs/c01-hello/attempt-2/meta.json ] || fail "attempt numbering reused a directory"
+ok "attempt numbering never overwrites"
+
+printf '# Card c04\nlong\n' > .orka/tasks/c04-long.md
+ORKA_FAKE_SLEEP=37 .orka/bin/orka run c04-long junior > /dev/null 2>&1 &
+runner=$!
+for _ in $(seq 1 50); do [ -f .orka/runs/c04-long/attempt-1/running ] && grep -q . .orka/runs/c04-long/attempt-1/running && break; sleep 0.2; done
+sleep 1
+.orka/bin/orka status c04-long | grep -q "c04-long .*running" || fail "status does not show a running card"
+.orka/bin/orka run c04-long junior > /dev/null 2>&1 && fail "second worker allowed in a busy worktree"
+kill -TERM $runner; wait $runner
+jq -e '.stopped == true and .timedOut == false' .orka/runs/c04-long/attempt-1/meta.json > /dev/null || fail "stop not recorded: $(cat .orka/runs/c04-long/attempt-1/meta.json)"
+pgrep -f "^sleep 37$" > /dev/null && fail "worker survived its stopped runner"
+[ ! -e .orka/runs/c04-long/attempt-1/running ] || fail "running marker left after stop"
+ok "running status, one worker per worktree, stop kills the worker"
+
+printf '# Card c05\nbad usage\n' > .orka/tasks/c05-usage.md
+ORKA_FAKE_BADUSAGE=1 .orka/bin/orka run c05-usage junior > /dev/null || fail "run with bad usage.json"
+jq -e '.usage == null and .rc == 0' .orka/runs/c05-usage/attempt-1/meta.json > /dev/null || fail "bad usage.json broke meta.json"
+ok "invalid usage.json does not break meta.json"
+
+printf '# Card c06\nfails\n' > .orka/tasks/c06-fails.md
+ORKA_FAKE_RC=7 .orka/bin/orka queue "c06-fails junior" > /dev/null && fail "queue hid a failed job"
+ok "queue exit code reports failures"
+
+trace="$tmp/trace"
+for c in p1 p2 p3 p4; do printf '# Card %s\n' $c > .orka/tasks/$c-par.md; done
+jq '.parallel = 1' .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+ORKA_FAKE_TRACE=$trace ORKA_FAKE_SLEEP=3 .orka/bin/orka queue "p1-par junior" "p2-par junior" > /dev/null &
+q1=$!
+ORKA_FAKE_TRACE=$trace ORKA_FAKE_SLEEP=3 .orka/bin/orka queue "p3-par junior" "p4-par junior" > /dev/null &
+q2=$!
+wait $q1 $q2
+[ ! -e "$trace/overlap" ] || fail "two queues ran workers at the same time with parallel 1"
+set -- .orka/runs/*-par; [ $# = 4 ] || fail "not all queued jobs ran"
+ok "two queues share the parallel limit"
+
+h="$tmp/home"
+mkdir -p "$h/.agents/skills/orka" && echo mine > "$h/.agents/skills/orka/notes.txt"
+HOME=$h bash "$repo/install.sh" > /dev/null 2>&1 && fail "installer replaced a directory it does not own"
+[ -f "$h/.agents/skills/orka/notes.txt" ] || fail "installer deleted user files"
+rm -rf "$h/.agents/skills/orka"
+HOME=$h bash "$repo/install.sh" > /dev/null && HOME=$h bash "$repo/install.sh" > /dev/null || fail "install / re-install"
+[ -f "$h/.agents/skills/orka/SKILL.md" ] && [ -L "$h/.claude/skills/orka" ] || fail "install layout"
+ok "installer: owns only what it installed, re-install works"
 
 echo "all smoke checks passed"

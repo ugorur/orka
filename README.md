@@ -18,9 +18,18 @@
 
 ---
 
-Your strongest agent is also your most expensive, and its context and quota run out first. Orka is an [Agent Skill](https://agentskills.io) that turns it into a **manager**: it talks with you, keeps the backlog, writes tight task cards and sends them to a **team of headless coding-agent CLIs**. It then checks their work itself and has a different model review anything that matters. The workers use up their tokens; your orchestrator spends its own on decisions.
+Your strongest agent is also your most expensive, and its context and quota run out first. Orka is an [Agent Skill](https://agentskills.io) plus a few hundred lines of bash that turn it into a **manager**. It talks with you, keeps the backlog and writes a task card for each piece of work. Headless coding-agent CLIs implement the cards, each in its own git worktree.
 
-It was not designed on a whiteboard. It was pulled out of **216 real worker runs (169 task cards, 67 worker-hours)** on two production projects, where Claude Code led a team of Codex and Grok workers, and every run was scored. The rules in the skill are what those scores taught us.
+"Prompt + `git worktree`" is the easy part. What Orka adds are the rules that made it work on real projects:
+
+- **A different model reviews every critical change** before merge.
+- **The orchestrator re-runs the acceptance itself.** A worker's report is a claim, and `commits: 0` is a failed delivery.
+- **QA checks against your original words,** not the developer's checklist.
+- **Every run is logged and scored,** so the next assignment is based on how each worker actually did.
+
+These came from **216 worker runs (169 cards, 67 worker-hours)** on two private production projects, where Claude Code orchestrated Codex and Grok. The anonymized numbers are in [docs/evidence.md](docs/evidence.md).
+
+A session, shortened (a *card* is one task file for one worker; `c03r` is the lead's review of card `c03`):
 
 ```text
 you     › Use Orka. Fix the five registration-form bugs we just listed, then the payment page.
@@ -41,9 +50,9 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
 ## Why
 
 - **Tokens and quota.** One strong model managing four cheaper ones gets through a lot more work before anything runs out. The orchestrator reads diffs and reports, not the whole codebase.
-- **A second model finds what the author can't.** In our ledger, **every first-round lead review (9 of 9) found at least one real bug that the author's own passing tests had missed**: a data-loss regression, a session-replay window, a double-order race. The median review took under 4 minutes on a cheap model.
+- **A second model finds what the author can't.** In our ledger, **every first-round lead review (9 of 9) found at least one real bug that the author's own passing tests had missed**: a data-loss regression, a session-replay window, a double-order race. The median review took under 4 minutes ([the list](docs/evidence.md#the-9-first-round-lead-reviews)).
 - **Parallel, isolated work.** Each card runs in its own git worktree and branch, with its own database, ports and browser session if you want them. Workers never step on each other or on your checkout.
-- **It learns.** Every run is scored (smart / dumb / speed / cost) before and after. The orchestrator reads those averages before it assigns the next card, and its own mistakes go into the same ledger.
+- **A ledger instead of a gut feeling.** Every run gets a predicted and an actual score (smart / dumb / speed / cost) in `ledger.jsonl`. The skill tells the orchestrator to read the per-worker averages before it assigns the next card. Nothing is trained; it's a log the next session actually reads, and the orchestrator's own mistakes go into it too.
 
 ## How it works
 
@@ -89,10 +98,12 @@ Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards
 
 ## Install
 
+> **Before you install:** workers run headless with their CLI's approval prompts turned off, as your user, with your credentials. A worktree keeps them from colliding; it is not a sandbox. Use a container or VM on machines that matter. [More](#safety-read-this)
+
 Pick **one**:
 
 ```bash
-# Every harness on this machine (installs to ~/.agents/skills/orka, links it for Claude Code and Cursor)
+# Every harness on this machine: installs to ~/.agents/skills/orka, links it for Claude Code (and Cursor, if installed)
 curl -fsSL https://raw.githubusercontent.com/ugorur/orka/master/install.sh | bash
 ```
 
@@ -117,7 +128,7 @@ In a git project, tell your agent:
 
 > Use Orka. Let's plan the next piece of work.
 
-1. **Bootstrap.** It runs `init.sh`, sees which CLIs are installed, proposes a team and asks you once. Your answer goes to `.orka/orka.json`:
+1. **Bootstrap.** It runs `init.sh`, sees which CLIs are installed, proposes a team and asks you once. Your answer goes to `.orka/orka.json`. Model ids are whatever your CLI accepts; these are the ones we used in September 2026:
 
    ```json
    {
@@ -133,6 +144,8 @@ In a git project, tell your agent:
      "autoMerge": false
    }
    ```
+
+   **Smallest setup:** one CLI you already use, at different price points. Example: all four roles on `claude` with `opus` as lead, `sonnet` as senior and mid, and `haiku` as junior. Or all on `codex`. You can add other vendors later; a lead from a different vendor than the author gives the best reviews.
 
 2. **Talk.** Describe bugs and features the way you would to a team lead. They go into `.orka/backlog.md` in your words. Nothing runs yet.
 3. **Say "go".** Cards are written, scores predicted, workers dispatched in parallel.
@@ -158,7 +171,7 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 | `orka run <card> <role> [worktree]` | Run one card on the worker for that role; creates worktree + branch `orka/<card>` if needed |
 | `orka run <card> <cli> <model> <effort> [worktree]` | Same, with a one-off worker |
 | `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once |
-| `orka status` | Every card: todo · running · done · failed · timeout, minutes, commits, worker |
+| `orka status` | Every card: todo · running · done · failed · timeout · stopped, minutes, commits, worker |
 | `orka score <card> predicted\|actual …` | Log a score; `actual` pulls worker, time and cost from the run |
 | `orka score --summary` | Average scores per worker/model, which the orchestrator reads before assigning |
 
@@ -212,7 +225,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 ## Status
 
-v0.1. The workflow is proven in production; the packaging is new. Linux is the primary platform, and macOS should work with coreutils. Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
+v0.1. The workflow was used on two private production repos (Claude Code orchestrating Codex and Grok). This public packaging is new. CI runs the plumbing tests on Linux and macOS. Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
 
 Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about 20 seconds).
 

@@ -1,0 +1,10 @@
+{
+  "name": "orka",
+  "version": "0.1.0",
+  "description": "Be the CTO: orchestrate a team of headless coding-agent CLIs (Codex, Grok, Claude Code, Cursor, Gemini, OpenCode, Copilot) in isolated git worktrees, with review, QA and a scored ledger.",
+  "author": { "name": "Umurcan Gorur", "url": "https://github.com/ugorur" },
+  "homepage": "https://github.com/ugorur/orka",
+  "repository": "https://github.com/ugorur/orka",
+  "license": "MIT",
+  "keywords": ["orchestration", "multi-agent", "codex", "grok", "worktree", "skills"]
+}

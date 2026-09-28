@@ -1,0 +1,15 @@
+{
+  "name": "orka",
+  "owner": {
+    "name": "Umurcan Gorur",
+    "url": "https://github.com/ugorur"
+  },
+  "description": "Orka: a CTO skill that runs a team of headless coding-agent CLIs.",
+  "plugins": [
+    {
+      "name": "orka",
+      "source": "./",
+      "description": "Be the CTO: orchestrate a team of headless coding-agent CLIs in isolated git worktrees, with review, QA and a scored ledger."
+    }
+  ]
+}

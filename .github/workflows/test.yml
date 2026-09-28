@@ -1,0 +1,19 @@
+name: test
+on: [push, pull_request]
+jobs:
+  smoke:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'macOS'
+        run: brew install coreutils jq
+      - run: git config --global init.defaultBranch main
+      - run: bash tests/smoke.sh
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck -S warning skills/orka/scripts/*.sh skills/orka/scripts/orka skills/orka/scripts/workers/*.sh install.sh tests/*.sh tests/workers/*.sh

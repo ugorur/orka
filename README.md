@@ -1,0 +1,221 @@
+<p align="center">
+  <img src="assets/orka-logo.png" alt="Orka" width="160">
+</p>
+
+<h1 align="center">Orka</h1>
+
+<p align="center">
+  <b>Make your best coding agent the CTO. Let cheaper agent CLIs do the work.</b><br>
+  One agent plans, writes task cards, reviews and merges. Codex, Grok, Claude Code, Copilot, Cursor, Gemini or OpenCode workers<br>
+  do the coding in parallel, each in its own git worktree. A different model reviews every critical change before it lands.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-0f766e"></a>
+  <img alt="Agent Skill" src="https://img.shields.io/badge/format-Agent%20Skill-0f766e">
+  <img alt="Pure bash" src="https://img.shields.io/badge/runtime-bash%20%2B%20git%20%2B%20jq-0f766e">
+</p>
+
+---
+
+Your strongest agent is also your most expensive, and its context and quota run out first. Orka is an [Agent Skill](https://agentskills.io) that turns it into a **manager**: it talks with you, keeps the backlog, writes tight task cards and sends them to a **team of headless coding-agent CLIs**. It then checks their work itself and has a different model review anything that matters. The workers use up their tokens; your orchestrator spends its own on decisions.
+
+It was not designed on a whiteboard. It was pulled out of **216 real worker runs (169 task cards, 67 worker-hours)** on two production projects, where Claude Code led a team of Codex and Grok workers, and every run was scored. The rules in the skill are what those scores taught us.
+
+```text
+you     › Use Orka. Fix the five registration-form bugs we just listed, then the payment page.
+orka    › Team from .orka/orka.json: lead codex/astra · senior codex/sol · mid grok · junior codex/luna
+          Wrote 3 cards. Predicted: c03 senior (hard point: old stored forms must still load) …
+          Say "go" when the backlog is right.
+you     › go
+orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin page.
+          Fix list appended to c03, attempt 2 running. c04 accepted: build, tests, browser check OK.
+          $ .orka/bin/orka status
+          CARD                      STATE     TRY   RC    MIN  GIT  WORKER
+          c03-registration-form     running     2    -     12    -
+          c03r-review               done        1    0      2    0  codex/gpt-6-astra/high
+          c04-payment-page          done        1    0     24    3  grok/grok-4.7/medium
+          c03q-qa                   todo
+```
+
+## Why
+
+- **Tokens and quota.** One strong model managing four cheaper ones gets through a lot more work before anything runs out. The orchestrator reads diffs and reports, not the whole codebase.
+- **A second model finds what the author can't.** In our ledger, **every first-round lead review (9 of 9) found at least one real bug that the author's own passing tests had missed**: a data-loss regression, a session-replay window, a double-order race. The median review took under 4 minutes on a cheap model.
+- **Parallel, isolated work.** Each card runs in its own git worktree and branch, with its own database, ports and browser session if you want them. Workers never step on each other or on your checkout.
+- **It learns.** Every run is scored (smart / dumb / speed / cost) before and after. The orchestrator reads those averages before it assigns the next card, and its own mistakes go into the same ledger.
+
+## How it works
+
+```text
+             you ──── talk, decide, say "go"
+              │
+      ┌───────▼────────┐   backlog.md · decisions.md · ledger.jsonl
+      │  orchestrator  │   (Claude Code, Codex, Grok, Copilot, Gemini, OpenCode, Cursor …)
+      │    = the CTO   │
+      └───────┬────────┘
+   card.md    │  .orka/bin/orka queue "c03-form senior" "c04-pay mid" …
+      ┌───────┼──────────────────────┬─────────────────────┐
+      ▼       ▼                      ▼                     ▼
+   senior    mid                  junior                 lead
+   worktree  worktree             QA in a headless      reviews the diff
+   orka/c03  orka/c04             browser, screenshots  REQUEST CHANGES / APPROVE
+      │       │                      │                     │
+      └───────┴──── report.txt · meta.json (rc, minutes, commits, cost) ─┘
+                          │
+              orchestrator re-runs the acceptance itself → merge → score → retro
+```
+
+Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards and may split them into sub-cards for cheaper workers; **mid** does normal development; **junior** does research, browser, mobile and CLI QA, and simple fixes. You map each role to any CLI and model you have: four vendors, or one vendor at four price points (for example Opus / Sonnet / Haiku).
+
+## Works with
+
+**As the orchestrator:** any agent harness that can load an Agent Skill (`SKILL.md`) and run shell commands: Claude Code, Codex CLI, Grok CLI, GitHub Copilot CLI, Gemini CLI, OpenCode, Cursor, Amp and others. In harnesses without skill support, point the agent at `SKILL.md`.
+
+**As workers:** each worker CLI is a small adapter in `.orka/bin/workers/<cli>.sh`.
+
+| Worker CLI | Adapter | Verified end to end¹ |
+|---|---|---|
+| OpenAI Codex CLI | `codex.sh` | ✅ codex-cli 0.157 (200+ production runs) |
+| Grok CLI | `grok.sh` | ✅ grok 1.0.41 (production runs) |
+| Claude Code | `claude.sh` | ✅ 2.1.284 |
+| GitHub Copilot CLI | `copilot.sh` | ✅ 1.0.88 |
+| Cursor Agent CLI | `cursor-agent.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
+| Gemini CLI | `gemini.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
+| OpenCode | `opencode.sh` | ⚠️ flags checked against `--help`; not run (no provider on the test machine) |
+| Anything else | [~10 lines](#add-a-worker-cli) | |
+
+¹ A real worker received a card, edited a file in its worktree, committed it and returned its report. Tried one on the ⚠️ ones? A PR that flips it to ✅ is very welcome.
+
+## Install
+
+Pick **one**:
+
+```bash
+# Every harness on this machine (installs to ~/.agents/skills/orka, links it for Claude Code and Cursor)
+curl -fsSL https://raw.githubusercontent.com/ugorur/orka/master/install.sh | bash
+```
+
+```text
+# Claude Code plugin
+/plugin marketplace add ugorur/orka
+/plugin install orka@orka
+```
+
+```bash
+# Or by hand: copy skills/orka to wherever your harness reads skills
+git clone https://github.com/ugorur/orka && cp -R orka/skills/orka ~/.agents/skills/
+```
+
+Install at **user** scope, not inside your project. A copy inside the repo would be checked out into every worker's worktree.
+
+Runtime needs `bash`, `git`, `jq` and `timeout` (on macOS: `brew install coreutils jq`), plus the worker CLIs you want, each logged in once interactively.
+
+## Quick start
+
+In a git project, tell your agent:
+
+> Use Orka. Let's plan the next piece of work.
+
+1. **Bootstrap.** It runs `init.sh`, sees which CLIs are installed, proposes a team and asks you once. Your answer goes to `.orka/orka.json`:
+
+   ```json
+   {
+     "team": {
+       "lead":   { "cli": "codex",  "model": "gpt-6-astra", "effort": "high" },
+       "senior": { "cli": "codex",  "model": "gpt-5.6-sol", "effort": "high" },
+       "mid":    { "cli": "grok",   "model": "grok-4.7",    "effort": "medium" },
+       "junior": { "cli": "claude", "model": "haiku",       "effort": "low" }
+     },
+     "parallel": 2,
+     "timeoutMinutes": 120,
+     "worktreeDir": "../myproject-wt",
+     "autoMerge": false
+   }
+   ```
+
+2. **Talk.** Describe bugs and features the way you would to a team lead. They go into `.orka/backlog.md` in your words. Nothing runs yet.
+3. **Say "go".** Cards are written, scores predicted, workers dispatched in parallel.
+4. **Watch or sleep.** The orchestrator accepts each branch itself, gets critical ones reviewed by the lead, has the junior test the UI, merges (or asks first), scores everyone and reports back: what's merged, how it was verified, what is still open.
+
+Everything lives in `.orka/` in your project, which is git-excluded and never committed:
+
+```text
+.orka/
+  orka.json       the team            backlog.md    your requests, your words
+  COMMON.md       rules on every card decisions.md  locked decisions + lessons
+  tasks/          the cards           ledger.jsonl  every score, predicted vs actual
+  runs/<card>/attempt-N/  prompt.md · report.txt · meta.json · logs
+  env/<slot>.env  per-card ports/DBs  bin/          runner + worker adapters
+```
+
+## The commands
+
+The orchestrator calls these; you rarely need to, but they are plain bash and easy to read.
+
+| Command | What it does |
+|---|---|
+| `orka run <card> <role> [worktree]` | Run one card on the worker for that role; creates worktree + branch `orka/<card>` if needed |
+| `orka run <card> <cli> <model> <effort> [worktree]` | Same, with a one-off worker |
+| `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once |
+| `orka status` | Every card: todo · running · done · failed · timeout, minutes, commits, worker |
+| `orka score <card> predicted\|actual …` | Log a score; `actual` pulls worker, time and cost from the run |
+| `orka score --summary` | Average scores per worker/model, which the orchestrator reads before assigning |
+
+(`orka` = `.orka/bin/orka`.)
+
+## What 216 runs taught us
+
+These are written into the skill as rules. Each one is here because we paid for it once:
+
+1. **"Done" means the user's words, everywhere they apply.** When QA checked against the developers' own checklists, the owner's re-check found only about 10% of the items truly done. QA now checks against the original request.
+2. **Author and reviewer must be different models.** It is the cheapest insurance in the whole setup.
+3. **A worker's "done" is a claim.** The orchestrator re-runs the acceptance in the worktree. `commits: 0` means nothing was delivered, whatever the report says.
+4. **Tests must use real data shapes.** One fix passed its unit test twice against a hand-made object and still failed on the real stored row. A junior's browser QA caught it.
+5. **UI changed = seen in a headless browser.** A main button shipped broken (blocked by CSP) while every test was green.
+6. **Isolate everything:** worktree, database, ports, cache index, browser session. Never the user's browser, never a shared container. Kill processes by PID only.
+7. **Every card names its hard point.** Otherwise you get the easy 80% done and the risky 20% quietly skipped.
+8. **Weak QA goes straight to the next level.** If the junior cannot run the checks, re-run the QA on mid immediately instead of retrying the junior.
+9. **Research cards need web access,** or they will quote from memory as if they had fetched it.
+10. **The orchestrator is scored too.** An independent reviewer and the lead grade it after each piece of work. In our runs its logged mistakes included a stdin hang, editing the runner while jobs were running, and a `pkill` that killed its own shell.
+
+## Add a worker CLI
+
+An adapter gets five environment variables and must leave the worker's final message in `report.txt`:
+
+```bash
+#!/usr/bin/env bash
+# .orka/bin/workers/mycli.sh: ORKA_WT (worktree) ORKA_MODEL ORKA_EFFORT ORKA_PROMPT (file) ORKA_OUT (dir)
+args=(--non-interactive --yes --cwd "$ORKA_WT")
+[ -n "$ORKA_MODEL" ] && args+=(--model "$ORKA_MODEL")
+mycli "${args[@]}" < "$ORKA_PROMPT" > "$ORKA_OUT/report.txt"
+```
+
+Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, prompt assembly, timeout, secret masking in reports, `meta.json` and the ledger. Optionally write `$ORKA_OUT/usage.json` (for example `{"usd": 0.42}`) and it will show up in the ledger. Please send adapters upstream.
+
+## Safety: read this
+
+- **Workers run with approvals bypassed** (`--dangerously-bypass-approvals-and-sandbox`, `--always-approve`, `--dangerously-skip-permissions`, …). Nobody is there to click "allow" for a headless worker. They run as your user, with your credentials.
+- **A git worktree is not a sandbox.** It keeps workers from colliding; it does not keep them out of the rest of your disk. On any machine that matters, run Orka inside a container or VM.
+- Worker reports are pattern-masked for obvious secrets (`*_KEY=…`, `Bearer …`, `sk-…`, `ghp_…`) before the orchestrator reads them. This is a seatbelt, not DLP. Keep real secrets out of `.orka/env/`.
+- Orka never pushes. Merging to your main branch asks you first unless you set `"autoMerge": true`.
+
+## FAQ
+
+**Why not just use my harness's built-in sub-agents?** Sub-agents are usually the same vendor, often the same model, sharing your quota. Orka's workers are separate CLIs with their own quotas and different blind spots, and every run gets a worktree, a report, a timeout and a ledger line. Orka still uses sub-agents where they fit best: an independent evaluation of the orchestrator.
+
+**Do I need Claude Code?** No. Any harness that can read `SKILL.md` and run bash can be the orchestrator, and any CLI with an adapter can be a worker. Our production runs happened to use Claude Code → Codex + Grok.
+
+**What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, 2–5 minutes and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok mid card, $1.50–$5. `orka score --summary` shows your own numbers.
+
+**Is this a framework?** No. It's a skill (a markdown playbook) plus about 300 lines of bash. No daemon, no server, no database, no Node/Python runtime.
+
+## Status
+
+v0.1. The workflow is proven in production; the packaging is new. Linux is the primary platform, and macOS should work with coreutils. Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
+
+Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about 20 seconds).
+
+## License
+
+[MIT](LICENSE) © Umurcan Gorur

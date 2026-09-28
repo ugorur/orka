@@ -1,0 +1,12 @@
+{
+  "team": {
+    "lead":   { "cli": "codex",  "model": "gpt-6-astra",  "effort": "high" },
+    "senior": { "cli": "codex",  "model": "gpt-5.6-sol",  "effort": "high" },
+    "mid":    { "cli": "grok",   "model": "grok-4.7",     "effort": "medium" },
+    "junior": { "cli": "codex",  "model": "gpt-6-luna",   "effort": "medium" }
+  },
+  "parallel": 2,
+  "timeoutMinutes": 120,
+  "worktreeDir": "../myproject-wt",
+  "autoMerge": false
+}

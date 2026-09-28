@@ -103,7 +103,6 @@ stopped=0
 trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
 # A signal interrupts `wait`; keep waiting until the worker group is really gone.
 while :; do wait $wpid; rc=$?; kill -0 $wpid 2>/dev/null || break; done
-[ $stopped = 1 ] && [ $rc -eq 0 ] && rc=143   # a cancelled run never counts as success
 # Whatever is left in the worker's process group (children that ignored TERM) goes too,
 # before the lock and running marker are released.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -111,6 +110,7 @@ for _ in 1 2 3 4 5 6 7 8 9 10; do
   kill -TERM -- -"$wpid" 2>/dev/null; sleep 1
 done
 kill -KILL -- -"$wpid" 2>/dev/null
+[ $stopped = 1 ] && [ $rc -eq 0 ] && rc=143   # a cancelled run never counts as success
 end=$(date +%s)
 after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)

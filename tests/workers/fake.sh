@@ -14,7 +14,10 @@ git add FAKE_WORKER.txt && git commit -qm "fake worker" || exit 1
 { echo "fake report"; echo "model=$ORKA_MODEL effort=$ORKA_EFFORT"; echo "prompt_lines=$(wc -l < "$ORKA_PROMPT")"; } > "$ORKA_OUT/report.txt"
 [ -n "${ORKA_FAKE_LEAK:-}" ] && echo "$ORKA_FAKE_LEAK" >> "$ORKA_OUT/report.txt"
 [ -n "${ORKA_FAKE_BADUSAGE:-}" ] && printf '%b\n' "$ORKA_FAKE_BADUSAGE" > "$ORKA_OUT/usage.json"
-[ -n "${ORKA_FAKE_STUBBORN:-}" ] && sh -c 'trap "" TERM; exec sleep 39' &   # a child that ignores TERM
+if [ -n "${ORKA_FAKE_STUBBORN:-}" ]; then # a child that ignores TERM
+  sh -c 'trap "" TERM; exec sleep 39' &
+  sleep 0.3 # let it install the trap before anyone signals the group
+fi
 if [ -n "${ORKA_FAKE_TRAP:-}" ]; then # exit 0 on TERM, like a CLI that shuts down cleanly
   trap 'exit 0' TERM; sleep "$ORKA_FAKE_SLEEP" & wait $!
 elif [ "${ORKA_FAKE_SLEEP:-0}" -gt 0 ]; then sleep "$ORKA_FAKE_SLEEP"; fi

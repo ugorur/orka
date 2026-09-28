@@ -230,7 +230,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 ## Status
 
-v0.1. The workflow was used on two private production repos (Claude Code orchestrating Codex and Grok). This public packaging is new. CI runs the plumbing tests on Linux and macOS. Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
+v0.1. The workflow was used on two private production repos (Claude Code orchestrating Codex and Grok). This public packaging is new. CI runs the plumbing tests on Linux and macOS (including the stock bash 3.2). Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
 
 Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about a minute).
 

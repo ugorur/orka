@@ -124,6 +124,15 @@ sleep 1; kill -TERM $runner; wait $runner
 pgrep -f "^sleep 39$" > /dev/null && fail "a child that ignored TERM outlived its runner"
 ok "cancel kills the whole worker process group"
 
+# Cancel while the runner is already cleaning up after a successful worker.
+printf '# Card c09\ncleanup\n' > .orka/tasks/c09-cleanup.md
+ORKA_FAKE_STUBBORN=1 .orka/bin/orka run c09-cleanup junior > /dev/null 2>&1 &
+runner=$!
+for _ in $(seq 1 50); do [ -s .orka/runs/c09-cleanup/attempt-1/report.txt ] && break; sleep 0.2; done
+sleep 1.5; kill -TERM $runner; wait $runner && fail "a run cancelled during cleanup exited 0"
+jq -e '.stopped == true and .rc != 0' .orka/runs/c09-cleanup/attempt-1/meta.json > /dev/null || fail "cleanup cancel meta"
+ok "a cancel during cleanup is not a success either"
+
 wtlock=".orka/runs/.locks/$(printf '%s' "$(cd "$tmp/app-wt/c01-hello" && pwd -P)" | tr '/ ' '__')"
 ln -s 999999 "$wtlock"
 .orka/bin/orka run c01-hello senior 2> "$tmp/stale.err" > /dev/null && fail "ran despite a stale lock"

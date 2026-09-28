@@ -12,6 +12,9 @@ jobs:
         run: brew install coreutils jq
       - run: git config --global init.defaultBranch main
       - run: bash tests/smoke.sh
+      - if: runner.os == 'macOS'
+        name: smoke with the stock bash 3.2
+        run: PATH="/bin:$PATH" bash -c 'bash --version | head -1 && bash tests/smoke.sh'
   shellcheck:
     runs-on: ubuntu-latest
     steps:

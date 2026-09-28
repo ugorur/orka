@@ -19,13 +19,17 @@ running() {
   echo $c
 }
 # Only one queue at a time may count free slots and launch. The lock is a symlink to the owner's
-# pid (atomic create + publish); a dead owner's lock is reclaimed, only the owner releases it.
-# ponytail: two queues reclaiming the same dead lock at the same instant can still race; rare.
+# pid (atomic create + publish); only the owner releases it. A lock left by a queue that was
+# killed with -9 is not reclaimed automatically (two queues could both win): fail closed.
 take_lock() {
   local owner
   until ln -s "$$" "$lock" 2>/dev/null; do
-    owner=$(readlink "$lock" 2>/dev/null)
-    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -f "$lock"; else sleep 2; fi
+    owner=$(readlink "$lock" 2>/dev/null) || continue   # released meanwhile: try again
+    if ! kill -0 "$owner" 2>/dev/null; then
+      echo "orka: stale queue lock (pid $owner is gone). If no other queue is running: rm $lock" >&2
+      exit 2
+    fi
+    sleep 2
   done
 }
 release_lock() { [ "$(readlink "$lock" 2>/dev/null)" = $$ ] && rm -f "$lock"; }

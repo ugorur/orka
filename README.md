@@ -70,7 +70,7 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
    worktree  worktree             QA in a headless      reviews the diff
    orka/c03  orka/c04             browser, screenshots  REQUEST CHANGES / APPROVE
       │       │                      │                     │
-      └───────┴──── report.txt · meta.json (rc, minutes, commits, cost) ─┘
+      └───────┴──── report.txt · meta.json (exit code, seconds, commits, usage) ─┘
                           │
               orchestrator re-runs the acceptance itself → merge → score → retro
 ```
@@ -114,6 +114,11 @@ curl -fsSL https://raw.githubusercontent.com/ugorur/orka/master/install.sh | bas
 ```
 
 ```bash
+# With the skills CLI (asks which agents to install for)
+npx skills add ugorur/orka
+```
+
+```bash
 # Or by hand: copy skills/orka to wherever your harness reads skills
 git clone https://github.com/ugorur/orka && cp -R orka/skills/orka ~/.agents/skills/
 ```
@@ -136,7 +141,7 @@ In a git project, tell your agent:
        "lead":   { "cli": "codex",  "model": "gpt-6-astra", "effort": "high" },
        "senior": { "cli": "codex",  "model": "gpt-5.6-sol", "effort": "high" },
        "mid":    { "cli": "grok",   "model": "grok-4.7",    "effort": "medium" },
-       "junior": { "cli": "claude", "model": "haiku",       "effort": "low" }
+       "junior": { "cli": "codex",  "model": "gpt-6-luna",  "effort": "medium" }
      },
      "parallel": 2,
      "timeoutMinutes": 120,
@@ -170,9 +175,9 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 |---|---|
 | `orka run <card> <role> [worktree]` | Run one card on the worker for that role; creates worktree + branch `orka/<card>` if needed |
 | `orka run <card> <cli> <model> <effort> [worktree]` | Same, with a one-off worker |
-| `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once |
+| `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once (no spaces in worktree paths) |
 | `orka status` | Every card: todo · running · done · failed · timeout · stopped, minutes, commits, worker |
-| `orka score <card> predicted\|actual …` | Log a score; `actual` pulls worker, time and cost from the run |
+| `orka score <card> predicted\|actual …` | Log a score; `actual` also copies worker, time and usage (tokens / $) from the run |
 | `orka score --summary` | Average scores per worker/model, which the orchestrator reads before assigning |
 
 (`orka` = `.orka/bin/orka`.)
@@ -227,7 +232,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 v0.1. The workflow was used on two private production repos (Claude Code orchestrating Codex and Grok). This public packaging is new. CI runs the plumbing tests on Linux and macOS. Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
 
-Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about 20 seconds).
+Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about a minute).
 
 ## License
 

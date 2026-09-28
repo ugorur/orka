@@ -116,6 +116,25 @@ for _ in $(seq 1 50); do grep -qs . .orka/runs/c07-trap/attempt-1/running && bre
 sleep 1; kill -TERM $runner; wait $runner && fail "a cancelled run exited 0"
 ok "a cancelled run is never a success"
 
+printf '# Card c08\nstubborn\n' > .orka/tasks/c08-stubborn.md
+ORKA_FAKE_STUBBORN=1 ORKA_FAKE_TRAP=1 ORKA_FAKE_SLEEP=37 .orka/bin/orka run c08-stubborn junior > /dev/null 2>&1 &
+runner=$!
+for _ in $(seq 1 50); do grep -qs . .orka/runs/c08-stubborn/attempt-1/running && break; sleep 0.2; done
+sleep 1; kill -TERM $runner; wait $runner
+pgrep -f "^sleep 39$" > /dev/null && fail "a child that ignored TERM outlived its runner"
+ok "cancel kills the whole worker process group"
+
+wtlock=".orka/runs/.locks/$(printf '%s' "$(cd "$tmp/app-wt/c01-hello" && pwd -P)" | tr '/ ' '__')"
+ln -s 999999 "$wtlock"
+.orka/bin/orka run c01-hello senior 2> "$tmp/stale.err" > /dev/null && fail "ran despite a stale lock"
+grep -q "stale lock" "$tmp/stale.err" || fail "stale lock message: $(cat "$tmp/stale.err")"
+rm -f "$wtlock"
+ln -s 999999 .orka/runs/.locks/queue
+.orka/bin/orka queue "c01-hello senior" 2> "$tmp/stale.err" > /dev/null && fail "queue ran despite a stale lock"
+grep -q "stale queue lock" "$tmp/stale.err" || fail "stale queue lock message"
+rm -f .orka/runs/.locks/queue
+ok "stale locks fail closed with a clear message"
+
 printf '# Card c05\nbad usage\n' > .orka/tasks/c05-usage.md
 i=0
 for bad in 'not json' '{}\n{}' '1\n{}'; do

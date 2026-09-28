@@ -6,7 +6,7 @@
 #
 # <card> is .orka/tasks/<card>.md. The worktree defaults to <worktreeDir>/<card> and is created
 # from the current HEAD on branch orka/<card> if missing. Output: .orka/runs/<card>/attempt-N/
-# (report.txt = the worker's final message, meta.json = timing/exit code/commits/usage).
+# (report.txt = the worker's final message, meta.json = exit code/seconds/commits/usage).
 # Per-slot values (.orka/env/<slot>.env, slot = card id before the first "-") are exported
 # and appended to the prompt. One worker per worktree at a time; review/QA cards pass the
 # implementation's worktree. Do not edit files in .orka/bin while any card is running.
@@ -53,15 +53,17 @@ gitdir() { real "$(git -C "$1" rev-parse --path-format=absolute "$2" 2>/dev/null
 
 # One worker per worktree at a time. The lock is a symlink whose target is the owner's pid:
 # creating it is atomic and publishes the owner in the same step; only the owner removes it.
-# ponytail: two runners reclaiming the same dead lock at the same instant can still race; rare
-# (needs a crashed runner plus two simultaneous restarts), fix with a reclaim lock if it ever bites.
+# A lock whose owner died (runner killed with -9) is never taken over automatically: two runners
+# reclaiming it at once could both win. Fail closed and let the orchestrator remove it.
 lock="$orka/runs/.locks/$(printf '%s' "$wt" | tr '/ ' '__')"
 mkdir -p "$orka/runs/.locks"
-if ! ln -s "$$" "$lock" 2>/dev/null; then
-  owner=$(readlink "$lock" 2>/dev/null)
-  if [ -n "$owner" ] && kill -0 "$owner" 2>/dev/null; then die "a worker (pid $owner) is already running in $wt"; fi
-  rm -f "$lock"; ln -s "$$" "$lock" 2>/dev/null || die "could not lock $wt"
-fi
+tries=0
+until ln -s "$$" "$lock" 2>/dev/null; do
+  tries=$((tries + 1)); [ $tries -le 20 ] || die "could not lock $wt ($lock)"
+  owner=$(readlink "$lock" 2>/dev/null) || continue   # released meanwhile: try again
+  kill -0 "$owner" 2>/dev/null && die "a worker (pid $owner) is already running in $wt"
+  die "stale lock: pid $owner is gone. Check that no worker is still running in $wt, then: rm $lock"
+done
 a=
 trap '[ "$(readlink "$lock" 2>/dev/null)" = $$ ] && rm -f "$lock"; [ -n "$a" ] && rm -f "$a/running"' EXIT
 
@@ -102,6 +104,13 @@ trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
 # A signal interrupts `wait`; keep waiting until the worker group is really gone.
 while :; do wait $wpid; rc=$?; kill -0 $wpid 2>/dev/null || break; done
 [ $stopped = 1 ] && [ $rc -eq 0 ] && rc=143   # a cancelled run never counts as success
+# Whatever is left in the worker's process group (children that ignored TERM) goes too,
+# before the lock and running marker are released.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  kill -0 -- -"$wpid" 2>/dev/null || break
+  kill -TERM -- -"$wpid" 2>/dev/null; sleep 1
+done
+kill -KILL -- -"$wpid" 2>/dev/null
 end=$(date +%s)
 after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)

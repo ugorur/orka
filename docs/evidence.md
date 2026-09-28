@@ -21,6 +21,8 @@ In both, **Claude Code (Opus) was the orchestrator** and **Codex CLI and Grok CL
 | codex / gpt-5.6-sol | 13 | 0 | 20 | senior |
 | grok / grok-4.7-build-fast | 1 | 0 | 11 | tried once; about 2× the cost, dropped |
 
+Grok CLI reports its own cost: the 26 Grok cards scored in the Project A ledger cost **$1.47–$9.35 each, median $3.70**. Codex reports tokens, not dollars.
+
 A non-zero exit is not the same as bad work. Most bad work exited 0 and was caught by acceptance, review or QA. That is the point of the rules.
 
 ## Ledger scores (orchestrator-assigned, 0–100)

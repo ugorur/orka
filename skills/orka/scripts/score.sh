@@ -3,7 +3,7 @@
 #   score.sh <card> predicted <smart> <dumb> <speed> <cost> "<why this worker>"
 #   score.sh <card> actual    <smart> <dumb> <speed> <cost> "<what happened>"
 #   score.sh <scope> retro    <smart> <dumb> <speed> <cost> "<lesson>" <reviewer>
-#   score.sh --summary        # average actual scores per worker, most recent model first
+#   score.sh --summary        # average actual scores per worker, best smart first
 # Scores are 0-100. smart: cleared the hard part. dumb: worst silly mistake (0 = none).
 # speed / cost: higher = faster / cheaper. "actual" lines copy worker, time and usage from
 # the card's latest attempt; "retro" lines score the orchestrator itself.

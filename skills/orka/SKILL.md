@@ -34,7 +34,7 @@ bash $ORKA/scripts/init.sh                       # set up / update .orka/ (safe 
 .orka/bin/orka score --summary                    # average scores per worker — read before assigning
 ```
 
-A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/<card>` on branch `orka/<card>`, created from your current HEAD. The part before the first `-` is the **slot**: `.orka/env/<slot>.env` (ports, database names, …) is exported and appended to the prompt. Output lands in `.orka/runs/<card>/attempt-N/` — `report.txt` (the worker's final message), `meta.json` (exit code, minutes, commits made, usage), `prompt.md`, logs.
+A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/<card>` on branch `orka/<card>`, created from your current HEAD. The part before the first `-` is the **slot**: `.orka/env/<slot>.env` (ports, database names, …) is exported and appended to the prompt. Output lands in `.orka/runs/<card>/attempt-N/` — `report.txt` (the worker's final message), `meta.json` (exit code, seconds, commits made, usage), `prompt.md`, `err.txt` and the CLI's raw log.
 
 **Never block your own session on a long run.** Start work detached — `nohup .orka/bin/orka queue … > .orka/queue.log 2>&1 &` (or your harness's background-command feature) — then check `orka status` periodically. Never edit `.orka/bin/` while a worker is running.
 

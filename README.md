@@ -52,7 +52,7 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
 - **Tokens and quota.** One strong model managing four cheaper ones gets through a lot more work before anything runs out. The orchestrator reads diffs and reports, not the whole codebase.
 - **A second model finds what the author can't.** **15 of 16 first-round lead reviews came back REQUEST CHANGES**, each time for real problems that had got past the author's own passing tests: a data-loss regression, a session-replay window, a double-order race. The median review took about 4 minutes ([details](docs/evidence.md#first-round-lead-reviews)).
 - **Parallel, isolated work.** Each card runs in its own git worktree and branch, with its own database, ports and browser session if you want them. Workers never step on each other or on your checkout.
-- **A ledger instead of a gut feeling.** Every run gets a predicted and an actual score (smart / dumb / speed / cost) in `ledger.jsonl`. The skill tells the orchestrator to read the per-worker averages before it assigns the next card. Nothing is trained; it's a log the next session actually reads, and the orchestrator's own mistakes go into it too.
+- **A ledger instead of a gut feeling.** Every run gets a predicted and an actual score ([smart / dumb / speed / cost](#the-scores)) in `ledger.jsonl`. The skill tells the orchestrator to read the per-worker averages before it assigns the next card. Nothing is trained; it's a log the next session actually reads, and the orchestrator's own mistakes go into it too.
 
 ## How it works
 
@@ -181,6 +181,33 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 | `orka score --summary` | Average scores per worker/model, which the orchestrator reads before assigning |
 
 (`orka` = `.orka/bin/orka`.)
+
+## The scores
+
+For each worker run, the orchestrator records four numbers from 0 to 100: before the run what it **predicts** for the worker it picked, after the run what **actually** happened. A card that needed three attempts has three actual lines. The gap between the two is how it learns whom to give the next card.
+
+| Score | Question it answers | Better | Example |
+|---|---|---|---|
+| **Smart** | Did the worker clear the card's *hard point*: the real root cause, everywhere it applies, honestly verified? | higher | 95: found the actual cause and proved it with a probe · 50: fixed the easy part, missed the risky part |
+| **Dumb** | How silly was the **worst** mistake it made? One bad mistake is enough; it is not an average. | **lower** | 0: none · 30: tested against a hand-made object instead of real data · 80: faked a success or broke something unrelated |
+| **Speed** | How fast was it for the size of the card? | higher | a 2-minute review scores high; 50 minutes for a small fix scores low |
+| **Cost** | How cheap was it (tokens or dollars) for the value delivered? | higher | a $0.04 critique scores high; a $9 run for a one-line change scores low |
+
+Smart and dumb are separate on purpose. A worker can crack a hard problem (smart 90) and still do something careless on the way (dumb 30). You want to know both before you hand it the next card.
+
+```text
+$ .orka/bin/orka score c03-registration-form predicted 85 10 50 45 "senior: contract → API → admin → mobile"
+$ .orka/bin/orka score c03-registration-form actual    78 35 35 35 "legacy rows vanished; tests used a fake object twice"
+  (each prints the ledger line it appended, as JSON)
+
+$ .orka/bin/orka score --summary   # example from a longer ledger: averages of "actual" lines per worker
+WORKER                   RUNS  SMART  DUMB  SPEED  COST  AVG_MIN
+codex/gpt-6-astra/high   5     94     3     86     90    4
+grok/grok-4.7/medium     2     87     7     86     92    3
+codex/gpt-6-luna/medium  1     50     35    90     92    2
+```
+
+The scores are the orchestrator's honest judgement, not a benchmark. In the retro after each piece of work, independent reviewers (including the lead) score the orchestrator itself on the same scale, as `retro` lines.
 
 ## What 217 runs taught us
 

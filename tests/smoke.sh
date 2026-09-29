@@ -3,7 +3,7 @@
 #   bash tests/smoke.sh
 set -u
 repo=$(cd "$(dirname "$0")/.." && pwd)
-tmp=$(mktemp -d)
+tmp=$(cd "$(mktemp -d)" && pwd -P)   # canonical: macOS /var is a symlink to /private/var
 trap 'rm -rf "$tmp"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok() { echo "ok   $*"; }

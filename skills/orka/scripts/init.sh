@@ -14,9 +14,12 @@ orka="$project/.orka"
 for f in "$orka"/runs/*/attempt-*/running; do
   [ -f "$f" ] && read -r pid _ < "$f" && kill -0 "$pid" 2>/dev/null && die "a worker is running ($f); update .orka/bin after it finishes"
 done
+for f in "$orka"/runs/*/attempt-*/pending; do
+  [ -f "$f" ] && die "a subagent attempt is pending ($f); finish or abandon it before updating .orka/bin"
+done
 
 mkdir -p "$orka"/{bin/workers,tasks,runs,env,templates}
-cp "$skill"/scripts/{orka,run.sh,queue.sh,status.sh,score.sh} "$orka/bin/"
+cp "$skill"/scripts/{orka,run.sh,finish.sh,queue.sh,status.sh,score.sh,lib.sh} "$orka/bin/"
 cp "$skill"/scripts/workers/*.sh "$orka/bin/workers/"   # custom adapters you added are kept
 cp "$skill"/templates/* "$orka/templates/"
 chmod +x "$orka"/bin/orka "$orka"/bin/*.sh "$orka"/bin/workers/*.sh

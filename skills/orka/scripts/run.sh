@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Run one task card on one worker, headless, and record the attempt.
+# Run one task card on a headless CLI, or prepare it for a native sub-agent, and record the attempt.
 #
 #   .orka/bin/run.sh <card> <role> [worktree]                   # role from .orka/orka.json
 #   .orka/bin/run.sh <card> <cli> <model> <effort> [worktree]   # explicit override
 #
 # <card> is .orka/tasks/<card>.md. The worktree defaults to <worktreeDir>/<card> and is created
 # from the current HEAD on branch orka/<card> if missing. Output: .orka/runs/<card>/attempt-N/
-# (report.txt = the worker's final message, meta.json = exit code/seconds/commits/usage).
+# (report.txt = the worker's final message, meta.json = exit code/seconds/commits/usage). Native
+# sub-agents leave pending after preparation; finish.sh writes their meta.json.
 # Per-slot values (.orka/env/<slot>.env, slot = card id before the first "-") are exported
 # and appended to the prompt. One worker per worktree at a time; review/QA cards pass the
 # implementation's worktree. Do not edit files in .orka/bin while any card is running.
@@ -14,6 +15,8 @@ set -u
 orka=$(cd "$(dirname "$0")/.." && pwd)
 project=$(dirname "$orka")
 conf="$orka/orka.json"
+# shellcheck source=/dev/null
+. "$orka/bin/lib.sh"
 die() { echo "orka: $*" >&2; exit 2; }
 [ $# -ge 2 ] || die "usage: run.sh <card> <role> [worktree] | run.sh <card> <cli> <model> <effort> [worktree]"
 [ -f "$conf" ] || die "missing $conf (run the Orka bootstrap first)"
@@ -32,7 +35,7 @@ else
   role=custom cli=$2 model=$3 effort=$4 wt=${5:-}
 fi
 adapter="$orka/bin/workers/$cli.sh"
-[ -x "$adapter" ] || die "no worker adapter $adapter"
+[ "$cli" = subagent ] || [ -x "$adapter" ] || die "no worker adapter $adapter"
 
 if [ -z "$wt" ]; then
   wtdir=$(jq -r '.worktreeDir // empty' "$conf")
@@ -65,7 +68,28 @@ until ln -s "$$" "$lock" 2>/dev/null; do
   die "stale lock: pid $owner is gone. Check that no worker is still running in $wt, then: rm $lock"
 done
 a=
-trap '[ "$(readlink "$lock" 2>/dev/null)" = $$ ] && rm -f "$lock"; [ -n "$a" ] && rm -f "$a/running"' EXIT
+card_lock=
+cleanup() {
+  [ "$(readlink "$lock" 2>/dev/null)" = "$$" ] && rm -f "$lock"
+  [ -n "$a" ] && rm -f "$a/running"
+  if [ -n "$card_lock" ] && [ -n "$a" ] &&
+     [ "$(readlink "$card_lock" 2>/dev/null)" = "$a/pending" ] && [ ! -f "$a/pending" ]; then
+    rm -f "$card_lock"
+  fi
+}
+trap cleanup EXIT
+
+# Native sub-agents outlive this runner. Check pending state only while holding the worktree
+# lock, so no worker can slip in between this scan and attempt allocation.
+for pending in "$orka"/runs/*/attempt-*/pending; do
+  [ -f "$pending" ] || continue
+  pending_wt=$(jq -er '.worktree | strings | select(length > 0)' "$pending" 2>/dev/null) \
+    || die "invalid pending state in $pending"
+  if [ "$pending_wt" = "$wt" ]; then
+    pending_card=$(jq -r '.card // "unknown"' "$pending")
+    die "subagent card $pending_card is still pending in $wt; finish or abandon it first"
+  fi
+done
 
 out="$orka/runs/$card"
 mkdir -p "$out"
@@ -73,6 +97,19 @@ n=$(ls "$out" | sed -n 's/^attempt-\([0-9]*\)$/\1/p' | sort -n | tail -1)
 n=$((${n:-0} + 1))
 until mkdir "$out/attempt-$n" 2>/dev/null; do n=$((n + 1)); done
 a="$out/attempt-$n"
+
+# A native sub-agent may be prepared in a caller-supplied worktree, so the worktree lock alone
+# cannot prevent two open attempts for one card. This persistent marker is claimed atomically and
+# is released only by finish/--abandon (or cleanup if preparation fails before pending is written).
+if [ "$cli" = subagent ]; then
+  card_lock="$orka/runs/.locks/card-$card"
+  if ! ln -s "$a/pending" "$card_lock" 2>/dev/null; then
+    rmdir "$a" 2>/dev/null || true
+    a=
+    die "subagent card $card already has an open attempt; finish or abandon it first"
+  fi
+fi
+
 start=$(date +%s)
 echo "$$ $start" > "$a/running"
 
@@ -81,7 +118,12 @@ envf="$orka/env/$slot.env"
 # shellcheck disable=SC1090
 if [ -f "$envf" ]; then set -a; . "$envf"; set +a; fi
 {
-  printf 'ORKA_WORKER — you are a worker on an Orka team. Do this card; do not orchestrate.\n\n'
+  printf 'ORKA_WORKER — you are a worker on an Orka team. Do this card; do not orchestrate.\n'
+  if [ "$cli" = subagent ]; then
+    printf 'Your working directory is `%s` — `cd` there in every shell command or use absolute paths; work and commit only there.\n\n' "$wt"
+  else
+    printf '\n'
+  fi
   [ -f "$orka/COMMON.md" ] && { cat "$orka/COMMON.md"; echo; }
   cat "$task"
   printf '\n## Run facts (literal values; your tool shell may not inherit variables)\n'
@@ -90,10 +132,24 @@ if [ -f "$envf" ]; then set -a; . "$envf"; set +a; fi
   [ -f "$envf" ] && sed 's/^/- /' "$envf"
 } > "$a/prompt.md"
 
+before=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
+if [ "$cli" = subagent ]; then
+  jq -n --arg card "$card" --arg role "$role" --arg cli "$cli" --arg model "$model" --arg effort "$effort" \
+    --arg wt "$wt" --arg base "$before" --argjson started "$start" \
+    '{card:$card, role:$role, cli:$cli, model:$model, effort:$effort, worktree:$wt, base:$base, started:$started}' \
+    > "$a/pending.tmp" && mv "$a/pending.tmp" "$a/pending" || die "could not write $a/pending"
+  printf 'subagent %s attempt %s\n' "$card" "$n"
+  printf '  model:    %s\n' "$model"
+  printf '  worktree: %s      (the sub-agent must work only here)\n' "$wt"
+  printf '  prompt:   %s\n' "$a/prompt.md"
+  printf '  report:   %s   (save the sub-agent'"'"'s final message here)\n' "$a/report.txt"
+  printf '  then:     .orka/bin/orka finish %s [exit-code]\n' "$card"
+  exit 0
+fi
+
 timeout_min=$(jq -r '.timeoutMinutes // 120' "$conf")
 tbin=$(command -v timeout || command -v gtimeout) || die "'timeout' is required (macOS: brew install coreutils)"
 cliv=$(command -v "$cli" >/dev/null && "$cli" --version 2>/dev/null < /dev/null | head -1)
-before=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 # Workers must not inherit the orchestrator's own agent session (a Claude Code orchestrator exports
 # its session id and messaging socket/token to child processes), and empty auth variables would
 # override a worker CLI's own login.
@@ -124,22 +180,14 @@ after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)
 usage=null
 jq -se 'length == 1 and (.[0] | type == "object")' "$a/usage.json" >/dev/null 2>&1 && usage=$(jq -c '.' "$a/usage.json")
-jq -n --arg card "$card" --arg cliv "$cliv" --arg role "$role" --arg cli "$cli" --arg model "$model" --arg effort "$effort" \
-  --arg wt "$wt" --arg base "$before" --arg head "$after" --argjson attempt "$n" --argjson rc "$rc" --argjson seconds $((end - start)) \
-  --argjson started "$start" --argjson commits "${commits:-0}" --argjson usage "$usage" --argjson stopped "$stopped" \
-  '{card:$card, role:$role, cli:$cli, cliVersion:$cliv, model:$model, effort:$effort, attempt:$attempt, rc:$rc,
-    timedOut:($stopped == 0 and ($rc == 124 or $rc == 137)), stopped:($stopped == 1), seconds:$seconds, started:$started,
-    commits:$commits, worktree:$wt, base:$base, head:$head, usage:$usage}' > "$a/meta.tmp" && mv "$a/meta.tmp" "$a/meta.json" \
+timed_out=0
+[ "$stopped" -eq 0 ] && { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; } && timed_out=1
+orka_write_meta "$a/meta.json" "$card" "$cliv" "$role" "$cli" "$model" "$effort" "$wt" \
+  "$before" "$after" "$n" "$rc" "$((end - start))" "$start" "${commits:-0}" "$usage" "$stopped" "$timed_out" \
   || { echo "orka: could not write $a/meta.json" >&2; [ "$rc" -eq 0 ] && rc=70; }
 # The orchestrator reads reports; mask obvious secrets a worker may have echoed.
 # ponytail: pattern-based, catches KEY=value / Bearer / sk- style only; not a DLP.
-[ -f "$a/report.txt" ] && sed -E \
-  -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)"[^"]*"/\1"***"/g' \
-  -e "s/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)'[^']*'/\\1'***'/g" \
-  -e 's/([A-Za-z0-9_]*(KEY|TOKEN|SECRET|PASSWORD|PASSWD)[A-Za-z0-9_]*[=:][[:space:]]*)[^[:space:]"'\'']+/\1***/g' \
-  -e 's/(Bearer[[:space:]]+)[A-Za-z0-9._~+\/=-]+/\1***/g' \
-  -e 's/(sk|pk|xai)-[A-Za-z0-9_-]{12,}/\1-***/g' \
-  -e 's/gh[pousr]_[A-Za-z0-9]{20,}/gh*_***/g' "$a/report.txt" > "$a/report.tmp" && mv "$a/report.tmp" "$a/report.txt"
+[ -f "$a/report.txt" ] && orka_mask_report "$a/report.txt"
 [ -s "$a/report.txt" ] || echo "orka: worker left no report (see $a/err.txt)" >&2
 echo "done $card rc=$rc $((end - start))s commits=$commits -> $a"
 exit "$rc"

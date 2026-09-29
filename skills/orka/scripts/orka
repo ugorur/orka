@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Orka command: .orka/bin/orka <run|queue|status|score> [args]  (init lives in the skill).
+# Orka command: .orka/bin/orka <run|finish|queue|status|score> [args]  (init lives in the skill).
 dir=$(cd "$(dirname "$0")" && pwd)
 case ${1:-} in
-  run|queue|status|score) cmd=$1; shift; exec "$dir/$cmd.sh" "$@" ;;
-  *) echo "usage: orka run|queue|status|score … (see the header of $dir/<cmd>.sh)" >&2; exit 2 ;;
+  run|finish|queue|status|score) cmd=$1; shift; exec "$dir/$cmd.sh" "$@" ;;
+  *) echo "usage: orka run|finish|queue|status|score … (see the header of $dir/<cmd>.sh)" >&2; exit 2 ;;
 esac

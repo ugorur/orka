@@ -88,6 +88,7 @@ Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards
 | OpenAI Codex CLI | `codex.sh` | ✅ codex-cli 0.157 (200+ production runs) |
 | Grok CLI | `grok.sh` | ✅ grok 1.0.41 (production runs) |
 | Claude Code | `claude.sh` | ✅ 2.1.284 |
+| Your orchestrator's own sub-agents (`"cli": "subagent"`) | built in (`orka run` + `orka finish`) | ✅ Claude Code 2.1.284 Agent tool |
 | GitHub Copilot CLI | `copilot.sh` | ✅ 1.0.88 |
 | Cursor Agent CLI | `cursor-agent.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
 | Gemini CLI | `gemini.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
@@ -150,7 +151,7 @@ In a git project, tell your agent:
    }
    ```
 
-   **Smallest setup:** one CLI you already use, at different price points. Example: all four roles on `claude` with `opus` as lead, `sonnet` as senior and mid, and `haiku` as junior. Or all on `codex`. You can add other vendors later; a lead from a different vendor than the author gives the best reviews.
+   **Smallest setup:** one CLI you already use, at different price points. In Claude Code on a subscription, all four roles can use `"cli": "subagent"`, with `opus` as lead, `sonnet` as senior and mid, and `haiku` as junior. Or use one headless CLI for every role. You can add other vendors later; a lead from a different vendor than the author gives the best reviews. Headless `claude -p` workers are for API-key or gateway setups.
 
 2. **Talk.** Describe bugs and features the way you would to a team lead. They go into `.orka/backlog.md` in your words. Nothing runs yet.
 3. **Say "go".** Cards are written, scores predicted, workers dispatched in parallel.
@@ -175,6 +176,7 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 |---|---|
 | `orka run <card> <role> [worktree]` | Run one card on the worker for that role; creates worktree + branch `orka/<card>` if needed |
 | `orka run <card> <cli> <model> <effort> [worktree]` | Same, with a one-off worker |
+| `orka finish <card> [exit-code]` | Finish a prepared native sub-agent attempt; use `--abandon` after a crash |
 | `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once (no spaces in worktree paths) |
 | `orka status` | Every card: todo · running · done · failed · timeout · stopped, minutes, commits, worker |
 | `orka score <card> predicted\|actual …` | Log a score; `actual` also copies worker, time and usage (tokens / $) from the run |
@@ -247,7 +249,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 ## FAQ
 
-**Why not just use my harness's built-in sub-agents?** Sub-agents are usually the same vendor, often the same model, sharing your quota. Orka's workers are separate CLIs with their own quotas and different blind spots, and every run gets a worktree, a report, a timeout and a ledger line. Orka still uses sub-agents where they fit best: an independent evaluation of the orchestrator.
+**Can I use my harness's built-in sub-agents?** Yes. Set a role's CLI to `subagent`; Orka prepares its worktree and prompt, your orchestrator runs it, and `orka finish` records its report and ledger metadata. Native sub-agents usually share the orchestrator's vendor and quota, so separate CLIs still help when you want different quotas or blind spots.
 
 **Do I need Claude Code?** No. Any harness that can read `SKILL.md` and run bash can be the orchestrator, and any CLI with an adapter can be a worker. Our production runs happened to use Claude Code → Codex + Grok.
 

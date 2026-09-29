@@ -151,13 +151,9 @@ timeout_min=$(jq -r '.timeoutMinutes // 120' "$conf")
 tbin=$(command -v timeout || command -v gtimeout) || die "'timeout' is required (macOS: brew install coreutils)"
 cliv=$(command -v "$cli" >/dev/null && "$cli" --version 2>/dev/null < /dev/null | head -1)
 # Workers must not inherit the orchestrator's own agent session (a Claude Code orchestrator exports
-# its session id and messaging socket/token to child processes), and empty auth variables would
-# override a worker CLI's own login.
+# its session id and messaging socket/token to child processes).
 unset CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH \
   CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PID CLAUDE_EFFORT
-for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL OPENAI_API_KEY XAI_API_KEY; do
-  [ -z "${!v:-}" ] && unset "$v"
-done
 # timeout runs the worker in its own process group and passes signals on to the whole group,
 # so stopping this runner (TERM/INT/HUP) stops the worker too, and we still write meta.json.
 ORKA_WT=$wt ORKA_MODEL=$model ORKA_EFFORT=$effort ORKA_PROMPT="$a/prompt.md" ORKA_OUT=$a \

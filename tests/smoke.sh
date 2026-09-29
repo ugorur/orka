@@ -59,8 +59,12 @@ grep -q "worktree: $native_wt" "$tmp/subagent.out" || fail "subagent worktree ou
 grep -q "prompt:   $proj/$sa/prompt.md" "$tmp/subagent.out" || fail "subagent prompt output"
 grep -q "report:   $proj/$sa/report.txt" "$tmp/subagent.out" || fail "subagent report output"
 [ -f "$sa/prompt.md" ] && [ -f "$sa/pending" ] && [ ! -f "$sa/meta.json" ] || fail "subagent prepare files"
+sed -n '2p' "$sa/prompt.md" | grep -Fq "Your working directory is \`$native_wt\`" \
+  || fail "subagent prompt does not lead with its absolute worktree: $(sed -n '1,3p' "$sa/prompt.md")"
 subagent_lock=".orka/runs/.locks/$(printf '%s' "$(cd "$native_wt" && pwd -P)" | tr '/ ' '__')"
 [ ! -L "$subagent_lock" ] || fail "subagent prepare left its pid lock"
+subagent_card_lock=".orka/runs/.locks/card-c10-native"
+[ "$(readlink "$subagent_card_lock" 2>/dev/null)" = "$proj/$sa/pending" ] || fail "subagent card marker missing"
 .orka/bin/orka status c10-native > "$tmp/subagent.status"
 grep -q "c10-native .*running .*subagent/sonnet" "$tmp/subagent.status" || fail "pending status: $(cat "$tmp/subagent.status")"
 
@@ -83,6 +87,7 @@ git -C "$native_wt" add native.txt && git -C "$native_wt" commit -qm native
 printf 'done OPENAI_API_KEY=sk-abcdefghijklmnop1234 Bearer abc.def.ghi\n' > "$sa/report.txt"
 .orka/bin/orka finish c10-native > /dev/null || fail "subagent finish"
 [ ! -f "$sa/pending" ] || fail "finish left pending state"
+[ ! -L "$subagent_card_lock" ] || fail "finish left subagent card marker"
 [ "$(jq -S 'keys' "$sa/meta.json")" = "$(jq -S 'keys' .orka/runs/c01-hello/attempt-1/meta.json)" ] || fail "subagent meta keys differ from CLI meta"
 jq -e '.cli == "subagent" and .cliVersion == "" and .model == "sonnet" and .effort == "medium" and
        .rc == 0 and .commits == 1 and .stopped == false and .timedOut == false and .usage == null' "$sa/meta.json" > /dev/null \
@@ -101,6 +106,107 @@ jq -e '.rc == 130 and .stopped == true and .timedOut == false' .orka/runs/c12-ab
 printf '# Card c13\nreuse\n' > .orka/tasks/c13-reuse.md
 .orka/bin/orka run c13-reuse junior "$abandon_wt" > /dev/null || fail "abandoned worktree remained blocked"
 ok "subagent abandon frees its worktree"
+
+# Pause runner B immediately before its first ln(1), let A prepare a subagent in the same
+# worktree, then release B. The pending scan must happen after B acquires the worktree lock.
+gate_bin="$tmp/gate-bin"
+mkdir -p "$gate_bin"
+real_ln=$(command -v ln)
+cat > "$gate_bin/ln" <<EOF
+#!/bin/sh
+if [ "\${ORKA_GATE_LOCK:-}" = 1 ] && [ ! -e "\$ORKA_GATE_READY" ]; then
+  : > "\$ORKA_GATE_READY"
+  while [ ! -e "\$ORKA_GATE_RELEASE" ]; do sleep 0.05; done
+fi
+exec "$real_ln" "\$@"
+EOF
+chmod +x "$gate_bin/ln"
+printf '# Card c16 owner\n' > .orka/tasks/c16-owner.md
+printf '# Card c16 racer\n' > .orka/tasks/c16-racer.md
+race_wt="$tmp/app-wt/c16-shared"
+git worktree add -q -b orka/c16-shared "$race_wt" HEAD || fail "create pending race worktree"
+gate_ready="$tmp/pending-race.ready"
+gate_release="$tmp/pending-race.release"
+PATH="$gate_bin:$PATH" ORKA_GATE_LOCK=1 ORKA_GATE_READY="$gate_ready" ORKA_GATE_RELEASE="$gate_release" \
+  .orka/bin/orka run c16-racer junior "$race_wt" > /dev/null 2> "$tmp/pending-race.err" &
+race_pid=$!
+for _ in $(seq 1 100); do [ -e "$gate_ready" ] && break; sleep 0.05; done
+[ -e "$gate_ready" ] || fail "runner did not reach the pending race gate"
+.orka/bin/orka run c16-owner native "$race_wt" > /dev/null || fail "prepare pending race owner"
+: > "$gate_release"
+wait "$race_pid" && fail "runner entered a worktree after a subagent became pending"
+grep -q "subagent card c16-owner is still pending" "$tmp/pending-race.err" \
+  || fail "pending race message: $(cat "$tmp/pending-race.err")"
+.orka/bin/orka finish c16-owner --abandon > /dev/null || fail "clean pending race owner"
+ok "pending exclusion is checked under the worktree lock"
+
+# Pause one finisher after it has read all pending fields. A concurrent abandonment wins;
+# when released, the first finisher must re-check pending and refuse to overwrite its meta.
+printf '# Card c17 finish race\n' > .orka/tasks/c17-finish-race.md
+.orka/bin/orka run c17-finish-race native > /dev/null || fail "prepare finish race"
+finish_race_a=.orka/runs/c17-finish-race/attempt-1
+printf 'finished by native agent\n' > "$finish_race_a/report.txt"
+jq_gate_bin="$tmp/jq-gate-bin"
+mkdir -p "$jq_gate_bin"
+real_jq=$(command -v jq)
+cat > "$jq_gate_bin/jq" <<EOF
+#!/bin/sh
+pause=0
+for arg do [ "\$arg" = .effort ] && pause=1; done
+output=\$("$real_jq" "\$@")
+rc=\$?
+if [ "\$pause" -eq 1 ] && [ "\${ORKA_GATE_FINISH:-}" = 1 ] && [ ! -e "\$ORKA_GATE_READY" ]; then
+  : > "\$ORKA_GATE_READY"
+  while [ ! -e "\$ORKA_GATE_RELEASE" ]; do sleep 0.05; done
+fi
+printf '%s\n' "\$output"
+exit "\$rc"
+EOF
+chmod +x "$jq_gate_bin/jq"
+finish_ready="$tmp/finish-race.ready"
+finish_release="$tmp/finish-race.release"
+PATH="$jq_gate_bin:$PATH" ORKA_GATE_FINISH=1 ORKA_GATE_READY="$finish_ready" ORKA_GATE_RELEASE="$finish_release" \
+  .orka/bin/orka finish c17-finish-race 0 > /dev/null 2> "$tmp/finish-race.err" &
+finish_pid=$!
+for _ in $(seq 1 100); do [ -e "$finish_ready" ] && break; sleep 0.05; done
+[ -e "$finish_ready" ] || fail "finisher did not reach the concurrency gate"
+.orka/bin/orka finish c17-finish-race --abandon > /dev/null || fail "concurrent abandonment"
+: > "$finish_release"
+wait "$finish_pid" && fail "a second finisher overwrote an abandonment"
+grep -q "already finished or abandoned" "$tmp/finish-race.err" \
+  || fail "concurrent finish message: $(cat "$tmp/finish-race.err")"
+jq -e '.rc == 130 and .stopped == true' "$finish_race_a/meta.json" > /dev/null \
+  || fail "concurrent finish overwrote abandonment meta"
+ok "finish is serialized and re-checks pending"
+
+# One card cannot have two native agents open in caller-supplied worktrees.
+printf '# Card c18 two prepares\n' > .orka/tasks/c18-two-prepares.md
+.orka/bin/orka run c18-two-prepares native > /dev/null || fail "prepare first card attempt"
+two_wt="$tmp/app-wt/c18-second"
+git worktree add -q -b orka/c18-second "$two_wt" HEAD || fail "create second card worktree"
+.orka/bin/orka run c18-two-prepares native "$two_wt" > /dev/null 2> "$tmp/two-prepares.err" \
+  && fail "same subagent card prepared twice"
+grep -q "already has an open attempt" "$tmp/two-prepares.err" \
+  || fail "second prepare message: $(cat "$tmp/two-prepares.err")"
+[ ! -d .orka/runs/c18-two-prepares/attempt-2 ] || fail "refused prepare left a shadow attempt"
+.orka/bin/orka finish c18-two-prepares --abandon > /dev/null || fail "abandon single open attempt"
+git worktree remove "$two_wt" || fail "remove second card worktree"
+[ ! -L .orka/runs/.locks/card-c18-two-prepares ] || fail "abandon left per-card marker"
+ok "one open subagent attempt per card"
+
+# Abandonment must close state even if the native agent's worktree disappeared.
+printf '# Card c19 missing worktree\n' > .orka/tasks/c19-missing-worktree.md
+.orka/bin/orka run c19-missing-worktree native > /dev/null || fail "prepare missing worktree attempt"
+missing_a=.orka/runs/c19-missing-worktree/attempt-1
+missing_wt="$tmp/app-wt/c19-missing-worktree"
+missing_base=$(jq -r '.base' "$missing_a/pending")
+git worktree remove --force "$missing_wt" || fail "remove pending worktree"
+.orka/bin/orka finish c19-missing-worktree --abandon > /dev/null || fail "abandon missing worktree"
+[ ! -f "$missing_a/pending" ] || fail "missing worktree abandonment left pending"
+jq -e --arg base "$missing_base" '.rc == 130 and .stopped == true and .head == $base and
+      .commits == 0 and .worktreeMissing == true' "$missing_a/meta.json" > /dev/null \
+  || fail "missing worktree abandonment meta: $(cat "$missing_a/meta.json")"
+ok "abandon closes an attempt whose worktree is gone"
 
 printf '# Card c14\nparallel slot\n' > .orka/tasks/c14-pending.md
 printf '# Card c15\nqueued worker\n' > .orka/tasks/c15-queued.md

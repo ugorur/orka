@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Orka worker adapter: Claude Code. See codex.sh for the adapter contract.
+# Orka worker adapter: Claude Code for API-key or gateway setups. On a Claude subscription,
+# use "cli": "subagent" from a Claude Code orchestrator. See codex.sh for the adapter contract.
 args=(-p --output-format json --dangerously-skip-permissions --no-session-persistence --disable-slash-commands)
 [ -n "$ORKA_MODEL" ] && args+=(--model "$ORKA_MODEL")
 [ -n "$ORKA_EFFORT" ] && args+=(--effort "$ORKA_EFFORT")

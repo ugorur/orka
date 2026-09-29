@@ -1,6 +1,6 @@
 ---
 name: orka
-description: Run a software project as its CTO — plan the work, write task cards, dispatch them to a team of headless coding-agent CLIs (Codex, Grok, Claude Code, Cursor, Gemini, OpenCode, Copilot) in isolated git worktrees, review, QA, score and merge. Use only when the user asks for Orka, asks you to orchestrate/manage a team of agents or CLIs, or to act as CTO/team lead over other models. Never use it when your prompt starts with ORKA_WORKER.
+description: Run a software project as its CTO — plan the work, write task cards, dispatch them to headless coding-agent CLIs or the harness's native sub-agents in isolated git worktrees, review, QA, score and merge. Use only when the user asks for Orka, asks you to orchestrate/manage a team of agents or CLIs, or to act as CTO/team lead over other models. Never use it when your prompt starts with ORKA_WORKER.
 ---
 
 # Orka — you are the CTO
@@ -27,6 +27,7 @@ All from the project root. `ORKA=<this skill's directory>`.
 bash $ORKA/scripts/init.sh                       # set up / update .orka/ (safe to re-run)
 .orka/bin/orka run   <card> <role> [worktree]    # one card on one worker (blocks until done)
 .orka/bin/orka run   <card> <cli> <model> <effort> [worktree]   # one-off override
+.orka/bin/orka finish <card> [exit-code]          # finish a native sub-agent attempt (or: --abandon)
 .orka/bin/orka queue "<card> <role>" "<card> <role>" …          # parallel, capped by orka.json "parallel"
 .orka/bin/orka status                             # every card: todo / running / done / failed / timeout / stopped
 .orka/bin/orka score <card> predicted|actual <smart> <dumb> <speed> <cost> "<note>"
@@ -34,14 +35,14 @@ bash $ORKA/scripts/init.sh                       # set up / update .orka/ (safe 
 .orka/bin/orka score --summary                    # average scores per worker — read before assigning
 ```
 
-A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/<card>` on branch `orka/<card>`, created from your current HEAD. The part before the first `-` is the **slot**: `.orka/env/<slot>.env` (ports, database names, …) is exported and appended to the prompt. Output lands in `.orka/runs/<card>/attempt-N/` — `report.txt` (the worker's final message), `meta.json` (exit code, seconds, commits made, usage), `prompt.md`, `err.txt` and the CLI's raw log.
+A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/<card>` on branch `orka/<card>`, created from your current HEAD. The part before the first `-` is the **slot**: `.orka/env/<slot>.env` (ports, database names, …) is exported and appended to the prompt. Output lands in `.orka/runs/<card>/attempt-N/` — `report.txt` (the worker's final message), `meta.json` (exit code, seconds, commits made, usage), `prompt.md`, `err.txt` and the CLI's raw log. A native sub-agent attempt has `pending` instead of `meta.json` until `orka finish` closes it.
 
 **Never block your own session on a long run.** Start work detached — `nohup .orka/bin/orka queue … > .orka/queue.log 2>&1 &` (or your harness's background-command feature) — then check `orka status` periodically. Never edit `.orka/bin/` while a worker is running.
 
 ## 0 · Bootstrap (first run in a project)
 
 1. Run `init.sh`. It lists which worker CLIs are installed.
-2. If `.orka/orka.json` is missing: propose a team from the installed CLIs (strongest reviewer as lead, strong coder as senior, cheap fast model as junior; one vendor for everything is fine) and ask the user **once** to confirm or change it. Then write `orka.json` (see `.orka/templates/orka.example.json`). If this harness cannot ask the user at all, write the proposal to `.orka/orka.proposed.json` and stop: a team is never chosen silently.
+2. If `.orka/orka.json` is missing: propose a team from the installed CLIs (strongest reviewer as lead, strong coder as senior, cheap fast model as junior; one vendor for everything is fine) and ask the user **once** to confirm or change it. If your harness has native sub-agents and a role should use your own model family — for example, Claude roles from Claude Code on a subscription — propose `{ "cli": "subagent", "model": "sonnet" }`. Then write `orka.json` (see `.orka/templates/orka.example.json`). If this harness cannot ask the user at all, write the proposal to `.orka/orka.proposed.json` and stop: a team is never chosen silently.
 3. Fill the project section of `.orka/COMMON.md` (stack, build/test commands, UI language, files never to edit, how to start a local stack). Keep it short — every card pays for it. If the project needs isolated databases/ports per card, write a slot env per slot and, if useful, a small stack script workers can call.
 4. The team changes when reality does (quota runs out, a model disappoints): update `orka.json` and add a line to `decisions.md`.
 
@@ -50,7 +51,7 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 1. **Intake.** While the user talks, record every request in `.orka/backlog.md` in their words, with their decisions. **Start nothing until the user says go.** Ask the questions you need before then.
 2. **Plan.** Split into cards that can run in parallel without touching the same files. One card = one worker = one worktree. Use `templates/card.md`: goal in the user's words, **the hard point**, facts you already measured, scope and out-of-scope, environment, acceptance you will re-run. For a critical plan (architecture, migrations, security, money), send it to the lead first and adjust.
 3. **Assign and predict.** Read `orka score --summary`. Pick the cheapest role that will clear the hard point. Senior cards get `templates/delegate.md` appended so they may split work. Before starting, log `orka score <card> predicted …` with one line on why.
-4. **Dispatch.** `orka queue` / `orka run`, detached. Independent cards run in parallel.
+4. **Dispatch.** CLI roles use `orka queue` / `orka run`, detached. For a `subagent` role, run `orka run` first. It prints the absolute prompt, worktree and report paths. Spawn your native sub-agent with the contents of `prompt.md`; tell it the absolute worktree path and that it must work and commit only there. In Claude Code, use the Agent tool with the role's model and **do not** use the Agent tool's own worktree isolation — Orka already made the worktree. Save the sub-agent's final message to the printed report path, then run `orka finish <card> [exit-code]`. Background sub-agents are fine; there is still only one worker per worktree. Use `orka finish <card> --abandon` after a crashed or abandoned sub-agent.
 5. **Accept — yourself.** A worker's "done" is a claim. In its worktree, re-run the acceptance: build, typecheck, tests, and the one live check that proves the hard point. Read the diff, not just the report. For an implementation card, `commits: 0` in `meta.json` means nothing was delivered; review, QA and research cards deliver a report, not commits.
 6. **Review.** Critical changes go to the lead before merge (`templates/review.md`, card `<id>r`). Run it **in the implementation's worktree** — pass it as the third argument: `orka run c03r-review lead <worktree of c03>` (the path is in c03's `meta.json`). The runner refuses a second worker in a worktree that is busy. Fix loop: append an "Attempt N — fix list" section to the original card and re-run it on the same worker; re-review until APPROVE.
 7. **QA.** Browser, mobile and CLI checks go to the junior (`templates/qa.md`, card `<id>q`), also run in the implementation's worktree. The reference is the user's words, not the developer's checklist. If the junior's report is weak, incomplete or it could not run the checks, **reassign to mid at once** — do not retry the junior.
@@ -76,7 +77,7 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 ## 3 · Harness notes
 
 - **Asking the user:** use your harness's question tool if it has one, otherwise ask in plain text and wait. If you truly cannot ask, take the safe default and record it in `decisions.md` (never for the team choice — see Bootstrap).
-- **Dispatch only through `orka run/queue`**, never through your harness's own sub-agent tool — work outside the runner has no worktree, no report and no ledger line. (Sub-agents are fine for your own retro and read-only research.)
+- **Dispatch only through `orka run/queue`, or `orka run` + native sub-agent + `orka finish` for a `subagent` role.** Never start implementation work outside those paths: it would have no Orka worktree, report or ledger line.
 - **Long waits:** poll `orka status` in short commands; keep each shell call under your harness's timeout. If your harness cannot keep a detached process alive between turns, run one card at a time in the foreground and set `timeoutMinutes` below the harness's command timeout.
 - **Worker safety:** adapters run CLIs with approvals bypassed so they can work headless. A worktree is not a sandbox — on machines that matter, run Orka inside a container or VM.
 

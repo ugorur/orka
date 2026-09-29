@@ -9,12 +9,29 @@ orka=$(cd "$(dirname "$0")/.." && pwd)
 max=${ORKA_PARALLEL:-$(jq -r '.parallel // 2' "$orka/orka.json")}
 lock="$orka/runs/.locks/queue"
 mkdir -p "$orka/runs/.locks"
+
+# Native sub-agents must be dispatched by the orchestrator between run and finish. Reject the
+# whole queue before starting anything so an invalid mixed queue cannot partially execute.
+for job in "$@"; do
+  read -ra check_argv <<< "$job"
+  [ ${#check_argv[@]} -ge 2 ] || { echo "orka: invalid queue job '$job'" >&2; exit 2; }
+  job_cli=$(jq -r --arg r "${check_argv[1]}" '.team[$r].cli // empty' "$orka/orka.json")
+  [ -n "$job_cli" ] || job_cli=${check_argv[1]}
+  if [ "$job_cli" = subagent ]; then
+    echo "orka: queue cannot run subagent job ${check_argv[0]}; use 'orka run' and then 'orka finish'" >&2
+    exit 2
+  fi
+done
+
 running() {
   local c=0 f pid
   for f in "$orka"/runs/*/attempt-*/running; do
     [ -f "$f" ] || continue
     read -r pid _ < "$f"
     kill -0 "$pid" 2>/dev/null && c=$((c + 1))
+  done
+  for f in "$orka"/runs/*/attempt-*/pending; do
+    [ -f "$f" ] && c=$((c + 1))
   done
   echo $c
 }

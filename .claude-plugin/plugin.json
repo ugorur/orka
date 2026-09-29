@@ -17,5 +17,8 @@
     "worktree",
     "skills"
   ],
-  "icon": "assets/orka-logo.png"
+  "icon": "assets/orka-logo.png",
+  "documentationUrl": "https://github.com/ugorur/orka#readme",
+  "supportUrl": "https://github.com/ugorur/orka/issues",
+  "privacyPolicyUrl": "https://github.com/ugorur/orka/blob/master/PRIVACY.md"
 }

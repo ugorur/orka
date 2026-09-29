@@ -88,7 +88,7 @@ Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards
 | OpenAI Codex CLI | `codex.sh` | ✅ codex-cli 0.157 (200+ production runs) |
 | Grok CLI | `grok.sh` | ✅ grok 1.0.41 (production runs) |
 | Claude Code | `claude.sh` | ✅ 2.1.284 |
-| Your orchestrator's own sub-agents (`"cli": "subagent"`) | built in | ⚠️ awaiting end-to-end orchestrator verification |
+| Your orchestrator's own sub-agents (`"cli": "subagent"`) | built in (`orka run` + `orka finish`) | ✅ Claude Code 2.1.284 Agent tool |
 | GitHub Copilot CLI | `copilot.sh` | ✅ 1.0.88 |
 | Cursor Agent CLI | `cursor-agent.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
 | Gemini CLI | `gemini.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |

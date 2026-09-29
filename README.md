@@ -184,7 +184,7 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 
 ## The scores
 
-Every card gets four numbers from 0 to 100, twice. Before the run the orchestrator logs what it **predicts** for the worker it picked. After the run it logs what **actually** happened. The gap between the two is how it learns whom to give the next card.
+For each worker run, the orchestrator records four numbers from 0 to 100: before the run what it **predicts** for the worker it picked, after the run what **actually** happened. A card that needed three attempts has three actual lines. The gap between the two is how it learns whom to give the next card.
 
 | Score | Question it answers | Better | Example |
 |---|---|---|---|
@@ -198,14 +198,16 @@ Smart and dumb are separate on purpose. A worker can crack a hard problem (smart
 ```text
 $ .orka/bin/orka score c03-registration-form predicted 85 10 50 45 "senior: contract → API → admin → mobile"
 $ .orka/bin/orka score c03-registration-form actual    78 35 35 35 "legacy rows vanished; tests used a fake object twice"
-$ .orka/bin/orka score --summary
+  (each prints the ledger line it appended, as JSON)
+
+$ .orka/bin/orka score --summary   # example from a longer ledger: averages of "actual" lines per worker
 WORKER                   RUNS  SMART  DUMB  SPEED  COST  AVG_MIN
 codex/gpt-6-astra/high   5     94     3     86     90    4
 grok/grok-4.7/medium     2     87     7     86     92    3
 codex/gpt-6-luna/medium  1     50     35    90     92    2
 ```
 
-The scores are the orchestrator's honest judgement, not a benchmark. Lead reviews and retros score the orchestrator itself on the same scale.
+The scores are the orchestrator's honest judgement, not a benchmark. In the retro after each piece of work, independent reviewers (including the lead) score the orchestrator itself on the same scale, as `retro` lines.
 
 ## What 217 runs taught us
 

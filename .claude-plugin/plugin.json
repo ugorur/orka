@@ -16,5 +16,6 @@
     "grok",
     "worktree",
     "skills"
-  ]
+  ],
+  "icon": "assets/orka-logo.png"
 }

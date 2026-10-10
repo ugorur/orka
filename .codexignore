@@ -1,0 +1,6 @@
+.orka/
+.orka-evidence/
+.env
+.env.*
+*.pem
+*.key

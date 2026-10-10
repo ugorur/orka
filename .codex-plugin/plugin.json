@@ -1,0 +1,44 @@
+{
+  "name": "orka",
+  "version": "0.3.0",
+  "description": "Make your best coding agent the CTO. Let cheaper agent CLIs do the work.",
+  "author": {
+    "name": "Umurcan Gorur",
+    "url": "https://github.com/ugorur"
+  },
+  "homepage": "https://github.com/ugorur/orka",
+  "repository": "https://github.com/ugorur/orka",
+  "license": "MIT",
+  "keywords": [
+    "orchestration",
+    "multi-agent",
+    "codex",
+    "grok",
+    "worktree",
+    "skills"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Orka",
+    "shortDescription": "Make your best coding agent the CTO. Let cheaper agent CLIs do the work.",
+    "longDescription": "Orka turns your strongest agent into a manager: it keeps the backlog in your words, writes task cards and dispatches them to cheaper headless coding-agent CLIs (Codex, Grok, Claude Code, Copilot, Cursor, Gemini, OpenCode) or native sub-agents, each in its own git worktree. A different model reviews every critical change, the orchestrator re-runs the acceptance itself, the junior does browser QA and research, and every run is scored in a ledger.",
+    "logo": "./assets/orka-logo.png",
+    "developerName": "Umurcan Gorur",
+    "category": "Developer Tools",
+    "websiteURL": "https://github.com/ugorur/orka",
+    "privacyPolicyURL": "https://github.com/ugorur/orka/blob/master/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/ugorur/orka/blob/master/LICENSE",
+    "defaultPrompt": [
+      "Use Orka. Let's plan the next piece of work.",
+      "Use Orka to fix the bugs we just listed, with a lead review before merge."
+    ],
+    "composerIcon": "./assets/orka-logo.png",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "screenshots": [
+      "./assets/social-preview.png"
+    ]
+  }
+}

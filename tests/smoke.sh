@@ -380,4 +380,7 @@ HOME=$h bash "$repo/install.sh" > /dev/null && HOME=$h bash "$repo/install.sh" >
 [ -f "$h/.agents/skills/orka/SKILL.md" ] && [ -L "$h/.claude/skills/orka" ] || fail "install layout"
 ok "installer: owns only what it installed, re-install works"
 
+[ "$(jq -r .version "$repo/.claude-plugin/plugin.json")" = "$(jq -r .version "$repo/.codex-plugin/plugin.json")" ] || fail "plugin manifest versions differ"
+ok "manifest versions match"
+
 echo "all smoke checks passed"

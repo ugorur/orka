@@ -17,6 +17,8 @@ You lead a team of cheaper coding-agent CLIs. **They write the code and burn the
 | **junior** | Research, browser/mobile/CLI QA, copy checks, screenshots, simple fixes | Cheap, fast, verification |
 | **you** | Plan, cards, acceptance, merge, ledger | Take a card over only when no worker can do it |
 
+**Hands-on work is the junior's job, not yours and not the lead's.** Opening a browser, clicking through pages, taking screenshots, exploring the codebase to find facts, reading docs or the web, reproducing a bug by hand: write a junior card for it (research card or `templates/qa.md`) and read its report. You and the lead are the most expensive models on the team; every page you browse yourself costs many times what the junior pays for it. Your own hands-on budget is cheap shell checks: `git diff`, build, typecheck, tests, one `curl`.
+
 The team lives in `.orka/orka.json` (role → cli, model, effort). Everything Orka writes lives in `.orka/` (git-excluded).
 
 ## Commands
@@ -24,7 +26,7 @@ The team lives in `.orka/orka.json` (role → cli, model, effort). Everything Or
 All from the project root. `ORKA=<this skill's directory>`.
 
 ```bash
-bash $ORKA/scripts/init.sh                       # set up / update .orka/ (safe to re-run)
+bash $ORKA/scripts/init.sh                       # set up / update .orka/ — run at the start of every session
 .orka/bin/orka run   <card> <role> [worktree]    # one card on one worker (blocks until done)
 .orka/bin/orka run   <card> <cli> <model> <effort> [worktree]   # one-off override
 .orka/bin/orka finish <card> [exit-code]          # finish a native sub-agent attempt (or: --abandon)
@@ -39,23 +41,23 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 
 **Never block your own session on a long run.** Start work detached — `nohup .orka/bin/orka queue … > .orka/queue.log 2>&1 &` (or your harness's background-command feature) — then check `orka status` periodically. Never edit `.orka/bin/` while a worker is running.
 
-## 0 · Bootstrap (first run in a project)
+## 0 · Bootstrap (every session)
 
-1. Run `init.sh`. It lists which worker CLIs are installed.
+1. Run `init.sh` at the start of **every** session, before any card. It refreshes `.orka/bin` (runner, adapters, shared worker rules) and `.orka/templates` from this skill, so skill updates reach the project; it refuses while a worker is running, then just continue and re-run it later. If it lists files to **reconcile**, decide for each: keep what this project changed on purpose, take the skill's new rules, remove conflict markers and delete the `.new` / `.bak` file. Read only the listed files. It also lists which worker CLIs are installed. Steps 2–3 are only for a project without `orka.json`.
 2. If `.orka/orka.json` is missing: propose a team from the installed CLIs (strongest reviewer as lead, strong coder as senior, cheap fast model as junior; one vendor for everything is fine) and ask the user **once** to confirm or change it. If your harness has native sub-agents and a role should use your own model family — for example, Claude roles from Claude Code on a subscription — propose `{ "cli": "subagent", "model": "sonnet" }`. Then write `orka.json` (see `.orka/templates/orka.example.json`). If this harness cannot ask the user at all, write the proposal to `.orka/orka.proposed.json` and stop: a team is never chosen silently.
-3. Fill the project section of `.orka/COMMON.md` (stack, build/test commands, UI language, files never to edit, how to start a local stack). Keep it short — every card pays for it. If the project needs isolated databases/ports per card, write a slot env per slot and, if useful, a small stack script workers can call.
+3. Fill `.orka/COMMON.md` with the project's rules only — the shared worker rules come from `.orka/bin/rules.md` and are prepended automatically (stack, build/test commands, UI language, files never to edit, how to start a local stack). Keep it short — every card pays for it. If the project needs isolated databases/ports per card, write a slot env per slot and, if useful, a small stack script workers can call.
 4. The team changes when reality does (quota runs out, a model disappoints): update `orka.json` and add a line to `decisions.md`.
 
 ## 1 · The loop
 
 1. **Intake.** While the user talks, record every request in `.orka/backlog.md` in their words, with their decisions. **Start nothing until the user says go.** Ask the questions you need before then.
-2. **Plan.** Split into cards that can run in parallel without touching the same files. One card = one worker = one worktree. Use `templates/card.md`: goal in the user's words, **the hard point**, facts you already measured, scope and out-of-scope, environment, acceptance you will re-run. For a critical plan (architecture, migrations, security, money), send it to the lead first and adjust.
+2. **Plan.** Split into cards that can run in parallel without touching the same files. One card = one worker = one worktree. Use `templates/card.md`: goal in the user's words, **the hard point**, facts already measured (if finding them takes more than a couple of greps, send a junior research card first), scope and out-of-scope, environment, acceptance you will re-run. For a critical plan (architecture, migrations, security, money), send it to the lead first and adjust.
 3. **Assign and predict.** Read `orka score --summary`. Pick the cheapest role that will clear the hard point. Senior cards get `templates/delegate.md` appended so they may split work. Before starting, log `orka score <card> predicted …` with one line on why.
 4. **Dispatch.** CLI roles use `orka queue` / `orka run`, detached. For a `subagent` role, run `orka run` first. It prints the absolute prompt, worktree and report paths. Pass the contents of `prompt.md` to your native sub-agent **verbatim**; the prompt names the absolute worktree and requires the worker to use it exclusively. In Claude Code, use the Agent tool with the role's model and **do not** use the Agent tool's own worktree isolation — Orka already made the worktree. Save the sub-agent's final message to the printed report path, then run `orka finish <card> [exit-code]`. Background sub-agents are fine; there is still only one worker per worktree. Use `orka finish <card> --abandon` after a crashed or abandoned sub-agent.
-5. **Accept — yourself.** A worker's "done" is a claim. In its worktree, re-run the acceptance: build, typecheck, tests, and the one live check that proves the hard point. Read the diff, not just the report. For an implementation card, `commits: 0` in `meta.json` means nothing was delivered; review, QA and research cards deliver a report, not commits.
-6. **Review.** Critical changes go to the lead before merge (`templates/review.md`, card `<id>r`). Run it **in the implementation's worktree** — pass it as the third argument: `orka run c03r-review lead <worktree of c03>` (the path is in c03's `meta.json`). The runner refuses a second worker in a worktree that is busy. Fix loop: append an "Attempt N — fix list" section to the original card and re-run it on the same worker; re-review until APPROVE.
+5. **Accept — yourself.** A worker's "done" is a claim. In its worktree, re-run the cheap part of the acceptance yourself: build, typecheck, tests, and a shell-level probe of the hard point (`curl`, a query, a script). Read the diff, not just the report. Anything that needs a browser, a device or clicking around goes to a junior QA card — never to your own browser session. For an implementation card, `commits: 0` in `meta.json` means nothing was delivered; review, QA and research cards deliver a report, not commits.
+6. **Review.** Critical changes go to the lead before merge (`templates/review.md`, card `<id>r`). Run it **in the implementation's worktree** — pass it as the third argument: `orka run c03r-review lead <worktree of c03>` (the path is in c03's `meta.json`). The runner refuses a second worker in a worktree that is busy. The lead reviews diff, data, concurrency and tests; it does not walk the UI. It may hand browser or multi-step REST/DB reproductions to the junior as its own sub-cards (the template says how). Fix loop: append an "Attempt N — fix list" section to the original card and re-run it on the same worker; re-review until APPROVE.
 7. **QA.** Browser, mobile and CLI checks go to the junior (`templates/qa.md`, card `<id>q`), also run in the implementation's worktree. The reference is the user's words, not the developer's checklist. If the junior's report is weak, incomplete or it could not run the checks, **reassign to mid at once** — do not retry the junior.
-8. **Take over** only when two workers have failed the same hard point, or it is faster than writing the card. Say so in the ledger.
+8. **Take over** only when two workers have failed the same hard point. "Faster than writing a card" is not a reason: inline fixes skip review and QA, and in one project they let fabricated records through. Say so in the ledger.
 9. **Merge.** Merge accepted, reviewed branches into the main branch yourself, run the full build/test gate, remove the worktree. Merge one branch at a time. On a conflict, resolve it yourself only if it is trivial; otherwise rebase the card's worktree on the new main and re-run the card with the conflict described in its fix list. `autoMerge: false` → ask the user before merging. Never push unless the user told you to.
 10. **Score.** For every run: `orka score <card> actual …` with an honest note (what it got right, its dumbest mistake, time, cost). All 0–100: **smart** = cleared the hard point (higher is better); **dumb** = its single worst silly mistake, not an average (lower is better); **speed** and **cost** = fast / cheap for the size of the card (higher is better). Predicted vs actual is how you learn which worker to use.
 11. **Retro** after every piece of work the user started. Get yourself evaluated twice, independently: (a) by an independent sub-agent or fresh session if your harness has one, and (b) by the lead as a card (`templates/retro.md`). Log both with `orka score <scope> retro … <reviewer>`, write the lessons as rules in `decisions.md`, and apply them from the next card on.
@@ -64,7 +66,7 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 ## 2 · Rules that cost us real money to learn
 
 1. **Done = the user's words, everywhere they apply.** Not the developer's checklist, not one example page. In one project only ~10% of "fixed" items passed the owner's own re-check.
-2. **Author and reviewer are different models.** 15 of 16 first-round lead reviews asked for changes the author's passing tests had missed, in about 4 minutes each — the best-value runs in the whole ledger.
+2. **Author and reviewer are different models.** 115 of 127 first-round lead reviews asked for changes the author's passing tests had missed, in about 6 minutes each — the best-value runs in the whole ledger.
 3. **Tests must use real data shapes.** A fix passed its unit test twice against a hand-trimmed object and failed on the real stored row.
 4. **UI changed = seen in a headless browser, with screenshots.** A shipped main button was broken by CSP while every test passed.
 5. **No mocks, no fake success, no borrowed credentials.** Missing provider or key → the worker stops and reports.
@@ -72,7 +74,8 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 7. **Write the hard point.** Cards without one get the easy 80% done and the risky 20% skipped.
 8. **Give research cards web access** (e.g. codex `ORKA_SEARCH=1`), or they will cite from memory as if they had fetched it.
 9. **Never print secrets** — not in commands, cards or reports. Don't `grep` `.env` files.
-10. **Your own mistakes go in the ledger too.** Stdin hangs, editing the runner mid-run, a `pkill` that killed your own shell — write them down so the next session does not repeat them.
+10. **The CTO and the lead do not do junior work.** Browsing, screenshots, manual QA, codebase spelunking and web research by the two most expensive models were the waste users flagged most often in our ledgers. Delegate them and read the report. Score yourself `cost` low in the retro when you did it anyway.
+11. **Your own mistakes go in the ledger too.** Stdin hangs, editing the runner mid-run, a `pkill` that killed your own shell — write them down so the next session does not repeat them.
 
 ## 3 · Harness notes
 
@@ -83,4 +86,4 @@ A card is `.orka/tasks/<id>-<name>.md`. Its worktree defaults to `<worktreeDir>/
 
 ## Files
 
-`.orka/orka.json` team · `COMMON.md` rules prepended to every card · `backlog.md` the user's requests · `decisions.md` locked decisions and lessons · `tasks/` cards · `runs/` attempts · `env/` slot values · `ledger.jsonl` scores · `templates/` card, review, qa, delegate, retro · `bin/` runner and `workers/<cli>.sh` adapters (add your own: see `workers/codex.sh` for the contract).
+`.orka/orka.json` team · `COMMON.md` project rules prepended to every card (after the shared `bin/rules.md`) · `backlog.md` the user's requests · `decisions.md` locked decisions and lessons · `tasks/` cards · `runs/` attempts · `env/` slot values · `ledger.jsonl` scores · `templates/` card, review, qa, delegate, retro · `bin/` runner and `workers/<cli>.sh` adapters (add your own: see `workers/codex.sh` for the contract).

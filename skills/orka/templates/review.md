@@ -11,4 +11,12 @@ Review in this order:
 
 You may run read-only commands and tests (use this card's slot values). Prove findings with a probe where you can.
 
+**No UI walk-throughs.** The junior QA walks every client point in the browser at desktop and mobile. Open a browser only to reproduce a specific bug you suspect (race, data loss, security); never re-walk the acceptance list.
+
+**Delegate hands-on checks to the junior.** When a finding needs a browser or multi-step REST/DB reproduction, write the steps and let the junior run them instead of doing it yourself:
+- Write `<orka home>/tasks/<your card id>-sub<N>-<name>.md`: exact setup (slot DB, throwaway admin via env, URL), numbered steps (clicks, REST calls with bodies, DB queries), what to record, and the required output (a table: step | result | evidence file). Say "do not change code, do not commit".
+- Give it its own worktree on the branch under review: `git worktree add <path> --detach HEAD`, then run `<orka home>/bin/run.sh <your card id>-sub<N>-<name> junior <path>` (blocks until done). It shares your slot: do not run your own server/tests at the same time.
+- Read its report at `<orka home>/runs/<sub card>/attempt-N/report.txt`, judge it yourself, then remove its worktree. If the report is vague, re-run with sharper steps once; a finding you cite must be backed by its evidence or your own probe.
+- At most 2 sub-workers at a time. List every sub-card and its outcome in your report.
+
 Output: verdict **APPROVE / APPROVE WITH NITS / REQUEST CHANGES**, then numbered findings: `file:line` · severity (blocker/major/minor/nit) · what breaks · concrete fix. No praise section.

@@ -27,7 +27,7 @@ Your strongest agent is also your most expensive, and its context and quota run 
 - **QA checks against your original words,** not the developer's checklist.
 - **Every run is logged and scored,** so the next assignment is based on how each worker actually did.
 
-These came from **217 worker runs (170 cards, 67 worker-hours)** on two private production projects, where Claude Code orchestrated Codex and Grok. The anonymized numbers are in [docs/evidence.md](docs/evidence.md).
+These came from **1,035 worker runs (477 cards, 242 worker-hours)** on eight projects between August and October 2026. In all of them Claude Code orchestrated Codex, Grok and its own sub-agents. The anonymized numbers are in [docs/evidence.md](docs/evidence.md).
 
 A session, shortened (a *card* is one task file for one worker; `c03r` is the lead's review of card `c03`):
 
@@ -50,7 +50,7 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
 ## Why
 
 - **Tokens and quota.** One strong model managing four cheaper ones gets through a lot more work before anything runs out. The orchestrator reads diffs and reports, not the whole codebase.
-- **A second model finds what the author can't.** **15 of 16 first-round lead reviews came back REQUEST CHANGES**, each time for real problems that had got past the author's own passing tests: a data-loss regression, a session-replay window, a double-order race. The median review took about 4 minutes ([details](docs/evidence.md#first-round-lead-reviews)).
+- **A second model finds what the author can't.** **115 of 127 first-round lead reviews came back REQUEST CHANGES**, for real problems that had got past the author's own passing tests: a data-loss regression, a session-replay window, a double-order race. The median review took about 6 minutes ([details](docs/evidence.md#first-round-lead-reviews)).
 - **Parallel, isolated work.** Each card runs in its own git worktree and branch, with its own database, ports and browser session if you want them. Workers never step on each other or on your checkout.
 - **A ledger instead of a gut feeling.** Every run gets a predicted and an actual score ([smart / dumb / speed / cost](#the-scores)) in `ledger.jsonl`. The skill tells the orchestrator to read the per-worker averages before it assigns the next card. Nothing is trained; it's a log the next session actually reads, and the orchestrator's own mistakes go into it too.
 
@@ -75,7 +75,7 @@ orka    › c03r (lead): REQUEST CHANGES, old stored forms vanish from the admin
               orchestrator re-runs the acceptance itself → merge → score → retro
 ```
 
-Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards and may split them into sub-cards for cheaper workers; **mid** does normal development; **junior** does research, browser, mobile and CLI QA, and simple fixes. You map each role to any CLI and model you have: four vendors, or one vendor at four price points (for example Opus / Sonnet / Haiku).
+Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards and may split them into sub-cards for cheaper workers; **mid** does normal development; **junior** does research, browser, mobile and CLI QA, and simple fixes. Hands-on work stays with the junior: the orchestrator and the lead are the most expensive models on the team, so they don't browse, click through pages or dig through the codebase themselves. The lead can send the junior its own sub-cards to reproduce a bug. You map each role to any CLI and model you have: four vendors, or one vendor at four price points (for example Opus / Sonnet / Haiku).
 
 ## Works with
 
@@ -85,10 +85,10 @@ Roles are abstract. **lead** reviews and judges; **senior** takes the hard cards
 
 | Worker CLI | Adapter | Verified end to end¹ |
 |---|---|---|
-| OpenAI Codex CLI | `codex.sh` | ✅ codex-cli 0.157 (200+ production runs) |
-| Grok CLI | `grok.sh` | ✅ grok 1.0.41 (production runs) |
+| OpenAI Codex CLI | `codex.sh` | ✅ codex-cli 0.157 (580+ production runs) |
+| Grok CLI | `grok.sh` | ✅ grok 1.0.41 (140+ production runs) |
 | Claude Code | `claude.sh` | ✅ 2.1.284 |
-| Your orchestrator's own sub-agents (`"cli": "subagent"`) | built in (`orka run` + `orka finish`) | ✅ Claude Code 2.1.284 Agent tool |
+| Your orchestrator's own sub-agents (`"cli": "subagent"`) | built in (`orka run` + `orka finish`) | ✅ Claude Code 2.1.284 Agent tool (298 production runs) |
 | GitHub Copilot CLI | `copilot.sh` | ✅ 1.0.88 |
 | Cursor Agent CLI | `cursor-agent.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
 | Gemini CLI | `gemini.sh` | ⚠️ flags checked against `--help`; not run (no login on the test machine) |
@@ -162,7 +162,7 @@ Everything lives in `.orka/` in your project, which is git-excluded and never co
 ```text
 .orka/
   orka.json       the team            backlog.md    your requests, your words
-  COMMON.md       rules on every card decisions.md  locked decisions + lessons
+  COMMON.md       project rules       decisions.md  locked decisions + lessons
   tasks/          the cards           ledger.jsonl  every score, predicted vs actual
   runs/<card>/attempt-N/  prompt.md · report.txt · meta.json · logs
   env/<slot>.env  per-card ports/DBs  bin/          runner + worker adapters
@@ -211,7 +211,7 @@ codex/gpt-6-luna/medium  1     50     35    90     92    2
 
 The scores are the orchestrator's honest judgement, not a benchmark. In the retro after each piece of work, independent reviewers (including the lead) score the orchestrator itself on the same scale, as `retro` lines.
 
-## What 217 runs taught us
+## What 1,035 runs taught us
 
 These are written into the skill as rules. Each one is here because we paid for it once:
 
@@ -224,7 +224,8 @@ These are written into the skill as rules. Each one is here because we paid for 
 7. **Every card names its hard point.** Otherwise you get the easy 80% done and the risky 20% quietly skipped.
 8. **Weak QA goes straight to the next level.** If the junior cannot run the checks, re-run the QA on mid immediately instead of retrying the junior.
 9. **Research cards need web access,** or they will quote from memory as if they had fetched it.
-10. **The orchestrator is scored too.** An independent reviewer and the lead grade it after each piece of work. In our runs its logged mistakes included a stdin hang, editing the runner while jobs were running, and a `pkill` that killed its own shell.
+10. **The orchestrator and the lead don't do the junior's work.** Their browsing, screenshots, manual QA and inline fixes were the waste users flagged most often. They write a card and read the report instead.
+11. **The orchestrator is scored too.** An independent reviewer and the lead grade it after each piece of work. In our runs its logged mistakes included a stdin hang, editing the runner while jobs were running, and a `pkill` that killed its own shell.
 
 ## Add a worker CLI
 
@@ -253,13 +254,13 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 **Do I need Claude Code?** No. Any harness that can read `SKILL.md` and run bash can be the orchestrator, and any CLI with an adapter can be a worker. Our production runs happened to use Claude Code → Codex + Grok.
 
-**What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, 2–5 minutes and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok mid card, $1.50–$9.35 (median $3.70). `orka score --summary` shows your own numbers.
+**What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, about 6 minutes (median of 348) and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok run, median $3.22 and at most $10.40 (83 runs). `orka score --summary` shows your own numbers.
 
 **Is this a framework?** No. It's a skill (a markdown playbook) plus about 300 lines of bash. No daemon, no server, no database, no Node/Python runtime.
 
 ## Status
 
-v0.1. The workflow was used on two private production repos (Claude Code orchestrating Codex and Grok). This public packaging is new. CI runs the plumbing tests on Linux and macOS (including the stock bash 3.2). Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
+v0.2. Used on eight projects so far: two private production repos before packaging, then six projects on this runner (818 runs, 28 Sep to 10 Oct 2026). CI runs the plumbing tests on Linux and macOS (including the stock bash 3.2). Issues and PRs are welcome, especially adapters and ✅ verifications for more CLIs.
 
 Run the plumbing tests with `bash tests/smoke.sh` (fake worker, no network, about a minute).
 

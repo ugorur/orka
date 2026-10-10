@@ -23,6 +23,30 @@ done
 grep -q "No .orka/orka.json yet" "$tmp/init.out" || fail "init should ask for a team"
 ok "init"
 
+# pre-v0.3 COMMON.md (shared rules + project section) is migrated to the project section only
+cp .orka/COMMON.md "$tmp/common.new"
+{ cat "$repo/skills/orka/scripts/rules.md"; echo; echo '<!-- Project-specific rules go below: x -->'; echo '- project rule X'; } > .orka/COMMON.md
+bash "$repo/skills/orka/scripts/init.sh" "$proj" > "$tmp/init2.out" || fail "re-init"
+grep -q "Migrated" "$tmp/init2.out" && grep -qx -- '- project rule X' .orka/COMMON.md && ! grep -q "Rules for every card" .orka/COMMON.md \
+  && [ -f .orka/COMMON.md.bak ] || fail "COMMON.md migration: $(cat .orka/COMMON.md)"
+cp "$tmp/common.new" .orka/COMMON.md
+ok "COMMON.md migration"
+
+# templates: project edits survive, skill changes merge in, only conflicts are handed to the orchestrator
+T=.orka/templates; B=$T/.base
+echo LOCAL-CARD >> $T/card.md                                        # project edit, skill unchanged
+sed 1d $B/review.md > "$tmp/b" && cp "$tmp/b" $B/review.md && { cat "$tmp/b"; echo LOCAL-REVIEW; } > $T/review.md   # clean merge
+sed '1s/.*/BASE/' $B/retro.md > "$tmp/b" && cp "$tmp/b" $B/retro.md && sed '1s/.*/MINE/' "$tmp/b" > $T/retro.md     # conflict
+rm $B/qa.md && echo LOCAL-QA >> $T/qa.md                              # no base
+bash "$repo/skills/orka/scripts/init.sh" "$proj" > "$tmp/init3.out" || fail "re-init templates"
+grep -q LOCAL-CARD $T/card.md || fail "project template edit lost"
+grep -q LOCAL-REVIEW $T/review.md && cmp -s <(sed '$d' $T/review.md) "$repo/skills/orka/templates/review.md" || fail "clean merge: $(cat $T/review.md)"
+grep -q '^<<<<<<< project' $T/retro.md && grep -q "retro.md: conflict" "$tmp/init3.out" || fail "conflict not reported"
+[ -f $T/qa.md.new ] && grep -q LOCAL-QA $T/qa.md && grep -q "qa.md: compare" "$tmp/init3.out" || fail "no-base case"
+grep -q "card.md\|review.md" "$tmp/init3.out" && fail "clean files listed for reconcile"
+cp "$repo"/skills/orka/templates/* $T/ && rm $T/qa.md.new
+ok "template reconcile"
+
 cp "$repo/tests/workers/fake.sh" .orka/bin/workers/fake.sh
 cat > .orka/orka.json <<'EOF'
 { "team": { "senior": { "cli": "fake", "model": "m-senior", "effort": "high" },
@@ -38,7 +62,8 @@ a=.orka/runs/c01-hello/attempt-1
 [ -d "$tmp/app-wt/c01-hello" ] || fail "default worktree not created"
 [ "$(git -C "$tmp/app-wt/c01-hello" branch --show-current)" = orka/c01-hello ] || fail "worktree branch"
 head -1 $a/prompt.md | grep -q "^ORKA_WORKER" || fail "worker marker not first line"
-grep -q "Rules for every card" $a/prompt.md || fail "COMMON.md not in prompt"
+grep -q "Rules for every card" $a/prompt.md || fail "rules.md not in prompt"
+grep -q "^## Project" $a/prompt.md || fail "COMMON.md not in prompt"
 grep -q "Do the thing" $a/prompt.md || fail "card not in prompt"
 grep -q "APP_PORT=4101" $a/prompt.md || fail "slot env not in prompt"
 grep -q "model=m-senior effort=high" $a/report.txt || fail "role not resolved: $(cat $a/report.txt)"

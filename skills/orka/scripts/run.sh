@@ -124,6 +124,7 @@ if [ -f "$envf" ]; then set -a; . "$envf"; set +a; fi
   else
     printf '\n'
   fi
+  cat "$orka/bin/rules.md"; echo
   [ -f "$orka/COMMON.md" ] && { cat "$orka/COMMON.md"; echo; }
   cat "$task"
   printf '\n## Run facts (literal values; your tool shell may not inherit variables)\n'

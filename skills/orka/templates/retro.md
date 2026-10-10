@@ -6,7 +6,7 @@ Read: `.orka/backlog.md` (what the user asked), `.orka/decisions.md`, `.orka/led
 
 Answer briefly:
 1. Did what was merged match what the user asked, in their words? What is still missing?
-2. Assignment: right worker for each card? Anything too expensive, too weak, or done by the orchestrator that a worker should have done (or the reverse)?
+2. Assignment: right worker for each card? Anything too expensive, too weak, or done by the orchestrator or the lead that a worker should have done (or the reverse)? Count browser sessions, screenshots, manual QA and research the orchestrator or lead did itself instead of a junior card.
 3. Cards: clear hard point and acceptance? Which card caused a wasted attempt and why?
 4. Acceptance: did the orchestrator verify independently, or trust a worker's claim?
 5. Mistakes: tooling errors, lost time, risky actions.

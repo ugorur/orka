@@ -4,6 +4,8 @@
 
 <h1 align="center">Orka</h1>
 
+[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dumurcan-gorur%252Forka%26metric%3Dtrust)](https://hol.org/registry/plugins/umurcan-gorur%2Forka)
+
 <p align="center">
   <b>Make your best coding agent the CTO. Let cheaper agent CLIs do the work.</b><br>
   One agent plans, writes task cards, reviews and merges. Codex, Grok, Claude Code, Copilot, Cursor, Gemini or OpenCode workers<br>

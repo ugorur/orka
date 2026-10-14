@@ -4,8 +4,6 @@
 
 <h1 align="center">Orka</h1>
 
-[![HOL Guard](https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dumurcan-gorur%252Forka%26metric%3Dtrust)](https://hol.org/registry/plugins/umurcan-gorur%2Forka)
-
 <p align="center">
   <b>Make your best coding agent the CTO. Let cheaper agent CLIs do the work.</b><br>
   One agent plans, writes task cards, reviews and merges. Codex, Grok, Claude Code, Copilot, Cursor, Gemini or OpenCode workers<br>
@@ -16,6 +14,7 @@
   <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-0f766e"></a>
   <img alt="Agent Skill" src="https://img.shields.io/badge/format-Agent%20Skill-0f766e">
   <img alt="Pure bash" src="https://img.shields.io/badge/runtime-bash%20%2B%20git%20%2B%20jq-0f766e">
+  <a href="https://hol.org/registry/plugins/umurcan-gorur%2Forka"><img alt="HOL Guard" src="https://img.shields.io/endpoint?url=https%3A%2F%2Fhol.org%2Fapi%2Fregistry%2Fbadges%2Fplugin%3Fslug%3Dumurcan-gorur%252Forka%26metric%3Dtrust"></a>
 </p>
 
 ---

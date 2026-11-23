@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.4.0 — unreleased
+## 0.4.0 — 2026-11-23
 
 - Reviews must prove a blocker or major with a command and its output. Style and naming never block. Problems already on the base branch are Pre-existing. A small diff gets a short review. Review rounds stop at `reviewRounds` (default 2); leftovers that do not block become follow-up cards.
 - A card's acceptance is the whole bar. A test that fails once and passes on one rerun is reported as flaky, and is never skipped or disabled.

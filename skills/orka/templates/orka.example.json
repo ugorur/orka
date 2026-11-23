@@ -6,6 +6,8 @@
     "junior": { "cli": "codex",  "model": "gpt-6-luna",   "effort": "medium" }
   },
   "parallel": 2,
+  "reviewRounds": 2,
+  "budget": 0,
   "timeoutMinutes": 120,
   "worktreeDir": "../myproject-wt",
   "autoMerge": false

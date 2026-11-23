@@ -16,7 +16,7 @@ git init -q -b main && git config user.email t@t && git config user.name t
 echo hi > README.md && git add . && git commit -qm init
 
 bash "$repo/skills/orka/scripts/init.sh" "$proj" > "$tmp/init.out" || fail "init"
-for p in bin/orka bin/run.sh bin/finish.sh bin/lib.sh bin/workers/codex.sh COMMON.md ledger.jsonl decisions.md backlog.md templates/card.md; do
+for p in bin/orka bin/run.sh bin/finish.sh bin/prune.sh bin/lib.sh bin/workers/codex.sh COMMON.md ledger.jsonl decisions.md backlog.md templates/card.md; do
   [ -e ".orka/$p" ] || fail "init did not create .orka/$p"
 done
 [ -z "$(git status --porcelain)" ] || fail ".orka is not git-excluded: $(git status --porcelain)"
@@ -300,6 +300,8 @@ ORKA_FAKE_SLEEP=37 .orka/bin/orka run c04-long junior > /dev/null 2>&1 &
 runner=$!
 for _ in $(seq 1 50); do [ -f .orka/runs/c04-long/attempt-1/running ] && grep -q . .orka/runs/c04-long/attempt-1/running && break; sleep 0.2; done
 sleep 1
+[ "$(cat .orka/runs/c04-long/attempt-1/worktree)" = "$(cd "$tmp/app-wt/c04-long" && pwd -P)" ] \
+  || fail "running attempt did not record its worktree"
 .orka/bin/orka status c04-long | grep -q "c04-long .*running" || fail "status does not show a running card"
 .orka/bin/orka run c04-long junior > /dev/null 2>&1 && fail "second worker allowed in a busy worktree"
 mkdir -p "$tmp/app-wt/c04-long/sub"
@@ -369,6 +371,218 @@ wait $q1 $q2
 [ ! -e "$trace/overlap" ] || fail "two queues ran workers at the same time with parallel 1"
 set -- .orka/runs/*-par; [ $# = 4 ] || fail "not all queued jobs ran"
 ok "two queues share the parallel limit"
+
+# --- Runner features: SLOW status, budget, model fallback -------------------------------
+now=$(date +%s)
+for c in hist1 hist2 hist3; do
+  printf '# Card %s\n' "$c" > ".orka/tasks/$c-slow.md"
+  mkdir -p ".orka/runs/$c-slow/attempt-1"
+  jq -n --arg card "$c-slow" \
+    '{card:$card,role:"slowrole",rc:0,stopped:false,timedOut:false,seconds:60}' \
+    > ".orka/runs/$c-slow/attempt-1/meta.json"
+done
+printf '# Card slow running\n' > .orka/tasks/slow-running.md
+mkdir -p .orka/runs/slow-running/attempt-1
+echo "$$ $((now - 301)) slowrole" > .orka/runs/slow-running/attempt-1/running
+.orka/bin/orka status slow-running > "$tmp/slow.status"
+grep -q "slow-running .*running .*slowrole SLOW (>2x slowrole median 1m)" "$tmp/slow.status" \
+  || fail "slow running status: $(cat "$tmp/slow.status")"
+
+for c in short1 short2; do
+  printf '# Card %s\n' "$c" > ".orka/tasks/$c-short.md"
+  mkdir -p ".orka/runs/$c-short/attempt-1"
+  jq -n --arg card "$c-short" \
+    '{card:$card,role:"shortrole",rc:0,stopped:false,timedOut:false,seconds:10}' \
+    > ".orka/runs/$c-short/attempt-1/meta.json"
+done
+printf '# Card short running\n' > .orka/tasks/short-running.md
+mkdir -p .orka/runs/short-running/attempt-1
+echo "$$ $((now - 301)) shortrole" > .orka/runs/short-running/attempt-1/running
+.orka/bin/orka status short-running > "$tmp/short.status"
+grep -q "SLOW" "$tmp/short.status" && fail "status flagged a role with fewer than 3 finished attempts"
+
+for c in zero1 zero2 zero3; do
+  printf '# Card %s\n' "$c" > ".orka/tasks/$c-zero.md"
+  mkdir -p ".orka/runs/$c-zero/attempt-1"
+  jq -n --arg card "$c-zero" \
+    '{card:$card,role:"zerorole",rc:0,stopped:false,timedOut:false,seconds:0}' \
+    > ".orka/runs/$c-zero/attempt-1/meta.json"
+done
+printf '# Card zero running\n' > .orka/tasks/zero-running.md
+mkdir -p .orka/runs/zero-running/attempt-1
+echo "$$ $((now - 30)) zerorole" > .orka/runs/zero-running/attempt-1/running
+.orka/bin/orka status zero-running > "$tmp/zero.status"
+grep -q "SLOW" "$tmp/zero.status" && fail "status flagged a run shorter than 60 seconds"
+
+printf '# Card slow pending\n' > .orka/tasks/slow-pending.md
+mkdir -p .orka/runs/slow-pending/attempt-1
+jq -n --argjson started "$((now - 301))" \
+  '{card:"slow-pending",role:"slowrole",model:"native-test",started:$started}' \
+  > .orka/runs/slow-pending/attempt-1/pending
+.orka/bin/orka status slow-pending > "$tmp/slow-pending.status"
+grep -q "subagent/native-test SLOW (>2x slowrole median 1m)" "$tmp/slow-pending.status" \
+  || fail "slow pending status: $(cat "$tmp/slow-pending.status")"
+rm -f .orka/runs/slow-running/attempt-1/running .orka/runs/short-running/attempt-1/running \
+  .orka/runs/zero-running/attempt-1/running .orka/runs/slow-pending/attempt-1/pending
+ok "status SLOW uses one role-median pass, requires 3 attempts, and ignores runs shorter than 60s"
+
+printf '# Card budget config\n' > .orka/tasks/budget-config.md
+printf '# Card budget env\n' > .orka/tasks/budget-env.md
+printf '# Card budget explicit\n' > .orka/tasks/budget-explicit.md
+printf '# Card budget native\n' > .orka/tasks/budget-native.md
+printf '# Card budget clamp\n' > .orka/tasks/budget-clamp.md
+printf '# Card budget minimal\n' > .orka/tasks/budget-minimal.md
+jq '.budget = 2' .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+.orka/bin/orka run budget-config senior > /dev/null 2> "$tmp/budget.err" || fail "config budget"
+jq -e '.effort == "low"' .orka/runs/budget-config/attempt-1/meta.json > /dev/null \
+  || fail "config budget effort"
+grep -q "budget 2: senior effort high -> low" "$tmp/budget.err" || fail "budget notice"
+ORKA_BUDGET=1 .orka/bin/orka run budget-env senior > /dev/null 2> "$tmp/budget-env.err" || fail "env budget"
+jq -e '.effort == "medium"' .orka/runs/budget-env/attempt-1/meta.json > /dev/null \
+  || fail "env budget did not override config"
+ORKA_BUDGET=9 .orka/bin/orka run budget-clamp senior > /dev/null 2> "$tmp/budget-clamp.err" \
+  || fail "large budget clamp"
+jq -e '.effort == "low"' .orka/runs/budget-clamp/attempt-1/meta.json > /dev/null \
+  || fail "large budget went below low"
+jq '.team.minimal = {"cli":"fake","model":"minimal-model","effort":"minimal"}' \
+  .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+ORKA_BUDGET=9 .orka/bin/orka run budget-minimal minimal > /dev/null 2>&1 || fail "minimal budget"
+jq -e '.effort == "minimal"' .orka/runs/budget-minimal/attempt-1/meta.json > /dev/null \
+  || fail "budget changed configured minimal effort"
+.orka/bin/orka run budget-explicit fake explicit-model max > /dev/null 2>&1 || fail "explicit budget run"
+jq -e '.effort == "max" and .role == "custom"' .orka/runs/budget-explicit/attempt-1/meta.json > /dev/null \
+  || fail "budget changed explicit run"
+jq '.budget = 1' .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+.orka/bin/orka run budget-native native > /dev/null 2>&1 || fail "native budget prepare"
+jq -e '.effort == "low"' .orka/runs/budget-native/attempt-1/pending > /dev/null \
+  || fail "budget did not affect subagent preparation"
+.orka/bin/orka finish budget-native --abandon > /dev/null || fail "clean budget native"
+for bad in false '"2"' -1 1.5; do
+  jq ".budget = $bad" .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+  ORKA_BUDGET=1 .orka/bin/orka run budget-config senior > /dev/null 2> "$tmp/budget-bad.err" \
+    && fail "bad config budget $bad accepted while ORKA_BUDGET was set"
+  grep -q "budget must be an integer >= 0" "$tmp/budget-bad.err" || fail "bad budget message"
+done
+ok "budget clamps high at low, preserves minimal, validates config, supports env override, and leaves explicit runs untouched"
+
+printf '# Card fallback configured\n' > .orka/tasks/fallback-configured.md
+printf '# Card fallback default\n' > .orka/tasks/fallback-default.md
+printf '# Card fallback normal\n' > .orka/tasks/fallback-normal.md
+printf '# Card fallback cancelled\n' > .orka/tasks/fallback-cancelled.md
+jq '.budget = 0 | .team.senior.model = "bad-model" | .team.senior.fallbackModel = "good-model"' \
+  .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+calls="$tmp/fallback-configured.calls"
+ORKA_FAKE_BADMODEL=bad-model ORKA_FAKE_CALLS="$calls" \
+  .orka/bin/orka run fallback-configured senior > /dev/null 2> "$tmp/fallback-configured.err" \
+  || fail "configured model fallback"
+[ "$(wc -l < "$calls" | tr -d ' ')" = 2 ] || fail "configured fallback did not run exactly twice"
+fa=.orka/runs/fallback-configured/attempt-1
+jq -e '.rc == 0 and .model == "good-model" and .modelFallback.from == "bad-model" and
+       (.modelFallback.reason | test("not supported"; "i"))' "$fa/meta.json" > /dev/null \
+  || fail "configured fallback meta: $(cat "$fa/meta.json")"
+[ -s "$fa/err.first.txt" ] && grep -q "retrying with good-model" "$fa/fallback.txt" \
+  || fail "configured fallback evidence"
+
+jq 'del(.team.senior.fallbackModel)' .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+calls="$tmp/fallback-default.calls"
+ORKA_FAKE_BADMODEL=bad-model ORKA_FAKE_CALLS="$calls" \
+  .orka/bin/orka run fallback-default senior > /dev/null 2> "$tmp/fallback-default.err" \
+  || fail "default model fallback"
+[ "$(wc -l < "$calls" | tr -d ' ')" = 2 ] || fail "default fallback did not run exactly twice"
+fa=.orka/runs/fallback-default/attempt-1
+jq -e '.rc == 0 and .model == "" and .modelFallback.from == "bad-model"' "$fa/meta.json" > /dev/null \
+  || fail "default fallback meta: $(cat "$fa/meta.json")"
+grep -q "retrying with the CLI default" "$fa/fallback.txt" || fail "default fallback message"
+
+jq '.team.senior.model = "working-model" | .team.senior.fallbackModel = "other-model"' \
+  .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+calls="$tmp/fallback-normal.calls"
+ORKA_FAKE_FAIL=1 ORKA_FAKE_CALLS="$calls" \
+  .orka/bin/orka run fallback-normal senior > /dev/null 2> "$tmp/fallback-normal.err" \
+  && fail "normal failure succeeded"
+[ "$(wc -l < "$calls" | tr -d ' ')" = 1 ] || fail "normal failure retried"
+[ ! -e .orka/runs/fallback-normal/attempt-1/fallback.txt ] || fail "normal failure recorded fallback"
+ok "rejected models retry once with configured or CLI-default fallback; normal failures do not"
+
+jq '.team.senior.model = "bad-model" | .team.senior.fallbackModel = "good-model"' \
+  .orka/orka.json > "$tmp/j" && mv "$tmp/j" .orka/orka.json
+calls="$tmp/fallback-cancelled.calls"
+ORKA_FAKE_BADMODEL=bad-model ORKA_FAKE_BADMODEL_SLEEP=30 ORKA_FAKE_CALLS="$calls" \
+  .orka/bin/orka run fallback-cancelled senior > /dev/null 2> "$tmp/fallback-cancelled.err" &
+runner=$!
+for _ in $(seq 1 50); do
+  [ -s "$calls" ] && [ -f .orka/runs/fallback-cancelled/attempt-1/running ] && break
+  sleep 0.1
+done
+[ -s "$calls" ] || fail "cancelled fallback adapter did not start"
+kill -TERM "$runner"
+wait "$runner"
+[ "$(wc -l < "$calls" | tr -d ' ')" = 1 ] || fail "cancelled model rejection was retried"
+fa=.orka/runs/fallback-cancelled/attempt-1
+jq -e '.stopped == true and (has("modelFallback") | not)' "$fa/meta.json" > /dev/null \
+  || fail "cancelled fallback meta: $(cat "$fa/meta.json")"
+[ ! -e "$fa/fallback.txt" ] || fail "cancelled fallback evidence was recorded"
+ok "cancelled or timed-out model rejections are not retried"
+
+# Prune gets its own repository so the other smoke worktrees remain available.
+prune_proj="$tmp/prune-app"
+prune_wtdir="$tmp/prune-wt"
+mkdir -p "$prune_proj" && git -C "$prune_proj" init -q -b main
+git -C "$prune_proj" config user.email t@t
+git -C "$prune_proj" config user.name t
+echo prune > "$prune_proj/README.md"
+printf '.env\nnode_modules/\n' > "$prune_proj/.gitignore"
+git -C "$prune_proj" add README.md .gitignore && git -C "$prune_proj" commit -qm init
+bash "$repo/skills/orka/scripts/init.sh" "$prune_proj" > /dev/null || fail "prune init"
+printf '{"worktreeDir":"%s"}\n' "$prune_wtdir" > "$prune_proj/.orka/orka.json"
+for kind in clean dry dirty unmerged running removefail afterfail; do
+  git -C "$prune_proj" worktree add -q -b "orka/prune-$kind" "$prune_wtdir/$kind" HEAD \
+    || fail "create prune $kind worktree"
+done
+mkdir -p "$prune_wtdir/clean/node_modules"
+echo local > "$prune_wtdir/clean/.env"
+echo package > "$prune_wtdir/clean/node_modules/package.txt"
+echo dirty > "$prune_wtdir/dirty/untracked.txt"
+echo unique > "$prune_wtdir/unmerged/unique.txt"
+git -C "$prune_wtdir/unmerged" add unique.txt && git -C "$prune_wtdir/unmerged" commit -qm unmerged
+mkdir -p "$prune_proj/.orka/runs/prune-running/attempt-1" "$prune_proj/.orka/runs/.locks"
+echo "$$ $(date +%s) junior" > "$prune_proj/.orka/runs/prune-running/attempt-1/running"
+running_path=$(cd "$prune_wtdir/running" && pwd -P)
+printf '%s\n' "$running_path" > "$prune_proj/.orka/runs/prune-running/attempt-1/worktree"
+
+"$prune_proj/.orka/bin/orka" prune --dry-run > "$tmp/prune-dry.out" || fail "prune dry run"
+grep -q "would remove $prune_wtdir/dry" "$tmp/prune-dry.out" || fail "dry-run listing"
+[ -d "$prune_wtdir/dry" ] && git -C "$prune_proj" show-ref --verify --quiet refs/heads/orka/prune-dry \
+  || fail "dry-run changed a worktree or branch"
+prune_bin="$tmp/prune-bin"
+mkdir -p "$prune_bin"
+real_git=$(command -v git)
+cat > "$prune_bin/git" <<EOF
+#!/bin/sh
+if [ "\$1" = -C ] && [ "\$3" = worktree ] && [ "\$4" = remove ] &&
+   [ "\$5" = "$prune_wtdir/removefail" ]; then
+  echo "simulated worktree removal failure" >&2
+  exit 1
+fi
+exec "$real_git" "\$@"
+EOF
+chmod +x "$prune_bin/git"
+PATH="$prune_bin:$PATH" "$prune_proj/.orka/bin/orka" prune > "$tmp/prune.out" || fail "prune"
+grep -q "removed $prune_wtdir/clean" "$tmp/prune.out" || fail "clean prune output: $(cat "$tmp/prune.out")"
+grep -q "also deleted ignored:.*\\.env.*node_modules/" "$tmp/prune.out" \
+  || fail "ignored paths not listed: $(cat "$tmp/prune.out")"
+grep -q "kept $prune_wtdir/dirty: 1 uncommitted files" "$tmp/prune.out" || fail "dirty prune reason"
+grep -q "kept $prune_wtdir/unmerged: not merged into" "$tmp/prune.out" || fail "unmerged prune reason"
+grep -q "kept $prune_wtdir/running: in use by prune-running" "$tmp/prune.out" || fail "running prune reason"
+grep -q "kept $prune_wtdir/removefail: simulated worktree removal failure" "$tmp/prune.out" \
+  || fail "prune removal failure reason"
+[ -d "$prune_wtdir/removefail" ] || fail "prune removed worktree after git refused"
+[ ! -d "$prune_wtdir/afterfail" ] || fail "prune stopped after a removal failure"
+[ ! -d "$prune_wtdir/clean" ] && ! git -C "$prune_proj" show-ref --verify --quiet refs/heads/orka/prune-clean \
+  || fail "prune left clean worktree or branch"
+grep -q "worktree disk before:" "$tmp/prune.out" && grep -q "freed: .* KB (.* MB)" "$tmp/prune.out" \
+  || fail "prune disk summary"
+ok "prune is inert in dry-run, lists ignored deletions, keeps live/dirty/unmerged work, and continues after git errors"
 
 h="$tmp/home"
 mkdir -p "$h/.agents/skills/orka" "$h/.agents/skills/orka.new" "$h/.agents/skills/orka.old" && echo mine > "$h/.agents/skills/orka/notes.txt"

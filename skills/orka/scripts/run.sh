@@ -39,11 +39,13 @@ else
   role=custom cli=$2 model=$3 effort=$4 wt=${5:-}
 fi
 
+jq -e 'if has("budget") then
+         (.budget | type == "number" and . >= 0 and floor == .)
+       else true end' "$conf" >/dev/null 2>&1 \
+  || die "budget must be an integer >= 0"
 if [ "${ORKA_BUDGET+x}" = x ]; then
   budget=$ORKA_BUDGET
 else
-  jq -e '(.budget // 0) | type == "number" and . >= 0 and floor == .' "$conf" >/dev/null 2>&1 \
-    || die "budget must be an integer >= 0"
   budget=$(jq -r '.budget // 0' "$conf")
 fi
 case $budget in ''|*[!0-9]*) die "budget must be an integer >= 0" ;; esac
@@ -143,6 +145,7 @@ if [ "$cli" = subagent ]; then
 fi
 
 start=$(date +%s)
+printf '%s\n' "$wt" > "$a/worktree"
 echo "$$ $start $role" > "$a/running"
 
 slot=${card%%-*}
@@ -230,7 +233,9 @@ end=$(date +%s)
 after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)
 
-if [ "$role_run" -eq 1 ] && [ "$rc" -ne 0 ] && [ "${commits:-0}" -eq 0 ] \
+if [ "$role_run" -eq 1 ] && [ "$stopped" -eq 0 ] \
+   && [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ] \
+   && [ "${commits:-0}" -eq 0 ] \
    && [ $((end - start)) -le 120 ] && [ -n "$model" ] && [ "$model" != "$fallback_model" ]; then
   fallback_reason=$(model_rejection)
   if [ -n "$fallback_reason" ]; then

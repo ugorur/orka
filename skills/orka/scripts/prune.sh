@@ -43,6 +43,22 @@ pending_by() {
   return 1
 }
 
+running_by() {
+  local wt=$1 running pid recorded card
+  for running in "$orka"/runs/*/attempt-*/running; do
+    [ -f "$running" ] || continue
+    read -r pid _ < "$running"
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || continue
+    [ -f "${running%/running}/worktree" ] || continue
+    IFS= read -r recorded < "${running%/running}/worktree"
+    [ "$recorded" = "$wt" ] || continue
+    card=${running#"$orka/runs/"}
+    echo "${card%%/*}"
+    return 0
+  done
+  return 1
+}
+
 locked_by() {
   local lock=$1 owner running pid card
   owner=$(readlink "$lock" 2>/dev/null)
@@ -56,6 +72,11 @@ locked_by() {
   done
   echo unknown
   return 0
+}
+
+one_line() {
+  awk 'NF { if (text == "") text = $0; else text = text "; " $0 }
+       END { print text }'
 }
 
 before=$(disk_kb)
@@ -75,6 +96,7 @@ wt=
 branch=
 process_worktree() {
   local path=$1 ref=$2 short_branch candidate=0 reason dirty_count card path_lock
+  local ignored status_output status_rc suffix git_error git_rc
   [ -n "$path" ] || return
   [ "$path" != "$main" ] || return
 
@@ -84,7 +106,9 @@ process_worktree() {
   [ "$candidate" -eq 1 ] || return
 
   path_lock="$orka/runs/.locks/$(printf '%s' "$path" | tr '/ ' '__')"
-  if card=$(pending_by "$path"); then
+  if card=$(running_by "$path"); then
+    reason="in use by $card"
+  elif card=$(pending_by "$path"); then
     reason="in use by $card"
   elif [ -e "$path_lock" ] || [ -L "$path_lock" ]; then
     card=$(locked_by "$path_lock")
@@ -94,32 +118,74 @@ process_worktree() {
     reason="in use by $card"
   else
     [ "$dry_run" -eq 1 ] || held_lock=$path_lock
-    # A sub-agent preparation writes pending before releasing this same lock.
-    if card=$(pending_by "$path"); then
+    # A runner writes its worktree marker, and sub-agent preparation writes pending,
+    # before releasing this same lock.
+    if card=$(running_by "$path"); then
+      reason="in use by $card"
+    elif card=$(pending_by "$path"); then
       reason="in use by $card"
     else
-      dirty_count=$(git -C "$path" status --porcelain 2>/dev/null | awk 'END {print NR + 0}')
-      if [ "$dirty_count" -gt 0 ]; then
+      status_output=$(git -C "$path" status --porcelain 2>&1)
+      status_rc=$?
+      dirty_count=$(printf '%s\n' "$status_output" | awk 'NF {count++} END {print count + 0}')
+      if [ "$status_rc" -ne 0 ]; then
+        reason=$(printf '%s\n' "$status_output" | one_line)
+        [ -n "$reason" ] || reason="git status failed"
+      elif [ "$dirty_count" -gt 0 ]; then
         reason="$dirty_count uncommitted files"
       elif ! git -C "$main" merge-base --is-ancestor "$(git -C "$path" rev-parse HEAD 2>/dev/null)" "$main_head" 2>/dev/null; then
         reason="not merged into $main_short"
       else
-        reason=
+        status_output=$(git -C "$path" status --porcelain --ignored=matching 2>&1)
+        status_rc=$?
+        if [ "$status_rc" -ne 0 ]; then
+          reason=$(printf '%s\n' "$status_output" | one_line)
+          [ -n "$reason" ] || reason="could not inspect ignored files"
+        else
+          ignored=$(printf '%s\n' "$status_output" | awk '
+            /^!! / {
+              path = substr($0, 4)
+              if (paths == "") paths = path
+              else paths = paths ", " path
+            }
+            END { print paths }
+          ')
+          reason=
+        fi
       fi
     fi
   fi
 
+  suffix=
+  [ -z "${ignored:-}" ] || suffix=" (also deleted ignored: $ignored)"
   if [ -n "$reason" ]; then
-    echo "kept $path: $reason"
+    printf 'kept %s: %s\n' "$path" "$reason"
   elif [ "$dry_run" -eq 1 ]; then
-    echo "would remove $path"
-  elif git -C "$main" worktree remove "$path"; then
-    case $short_branch in
-      orka/*) git -C "$main" branch -d "$short_branch" >/dev/null || die "removed $path but could not delete branch $short_branch" ;;
-    esac
-    echo "removed $path"
+    printf 'would remove %s%s\n' "$path" "$suffix"
   else
-    echo "kept $path: git refused removal"
+    git_error=$(git -C "$main" worktree remove "$path" 2>&1)
+    git_rc=$?
+    if [ "$git_rc" -ne 0 ]; then
+      git_error=$(printf '%s\n' "$git_error" | one_line)
+      [ -n "$git_error" ] || git_error="git refused removal"
+      printf 'kept %s: %s\n' "$path" "$git_error"
+    else
+      git_error=
+      git_rc=0
+      case $short_branch in
+        orka/*)
+          git_error=$(git -C "$main" branch -d "$short_branch" 2>&1)
+          git_rc=$?
+          ;;
+      esac
+      if [ "$git_rc" -eq 0 ]; then
+        printf 'removed %s%s\n' "$path" "$suffix"
+      else
+        git_error=$(printf '%s\n' "$git_error" | one_line)
+        [ -n "$git_error" ] || git_error="git refused branch deletion"
+        printf 'kept %s: %s%s\n' "$path" "$git_error" "$suffix"
+      fi
+    fi
   fi
   [ -z "$held_lock" ] || [ "$(readlink "$held_lock" 2>/dev/null)" != "$$" ] || rm -f "$held_lock"
   held_lock=
@@ -138,7 +204,15 @@ while IFS= read -r line || [ -n "$line" ]; do
 done < "$list"
 [ -z "$wt" ] || process_worktree "$wt" "$branch"
 
-[ "$dry_run" -eq 1 ] || git -C "$main" worktree prune
+if [ "$dry_run" -eq 0 ]; then
+  prune_error=$(git -C "$main" worktree prune 2>&1)
+  prune_rc=$?
+  if [ "$prune_rc" -ne 0 ]; then
+    prune_error=$(printf '%s\n' "$prune_error" | one_line)
+    [ -n "$prune_error" ] || prune_error="git worktree prune failed"
+    echo "orka: $prune_error" >&2
+  fi
+fi
 after=$(disk_kb)
 freed=$((before - after))
 [ "$freed" -ge 0 ] || freed=0

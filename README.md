@@ -190,6 +190,8 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 
 (`orka` = `.orka/bin/orka`.)
 
+`orka prune` deletes and lists ignored files when a worktree is otherwise merged, clean and unused; use `orka prune --dry-run` first if ignored files may contain local data.
+
 ## The scores
 
 For each worker run, the orchestrator records four numbers from 0 to 100: before the run what it **predicts** for the worker it picked, after the run what **actually** happened. A card that needed three attempts has three actual lines. The gap between the two is how it learns whom to give the next card.

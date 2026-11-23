@@ -2,33 +2,36 @@
 # One line per card: state of its latest attempt. `status.sh` or `status.sh <card>`.
 set -u
 orka=$(cd "$(dirname "$0")/.." && pwd)
+task_filter=${1:-*}
 
-role_history() {
-  local wanted=$1 meta
-  for meta in "$orka"/runs/*/attempt-*/meta.json; do
-    [ -f "$meta" ] || continue
-    jq -er --arg role "$wanted" \
-      'select(.role == $role and .rc == 0 and .stopped == false and .timedOut == false and
-              (.seconds | type == "number")) | (.seconds | floor)' "$meta" 2>/dev/null
-  done | sort -n | awk '
-    { value[NR] = $1 }
-    END {
-      count = NR
-      if (count == 0) { print "0 0"; exit }
-      if (count % 2) median = value[(count + 1) / 2]
-      else median = int((value[count / 2] + value[count / 2 + 1]) / 2)
-      print count, median
-    }'
-}
+role_histories=
+set -- "$orka"/runs/*/attempt-*/meta.json
+if [ -f "$1" ]; then
+  role_histories=$(jq -rs '
+    [.[] |
+      select(.role != null and .rc == 0 and .stopped == false and .timedOut == false and
+             (.seconds | type == "number")) |
+      {role: .role, seconds: (.seconds | floor)}] |
+    group_by(.role)[] |
+    (map(.seconds) | sort) as $values |
+    ($values | length) as $count |
+    (if $count % 2 == 1 then $values[($count / 2 | floor)]
+     else (($values[$count / 2 - 1] + $values[$count / 2]) / 2 | floor) end) as $median |
+    [. [0].role, $count, $median] | @tsv
+  ' "$@" 2>/dev/null)
+fi
 
 slow_note() {
   local role=$1 elapsed=$2 history count median minutes
   [ -n "$role" ] || return
-  history=$(role_history "$role")
+  history=$(printf '%s\n' "$role_histories" | awk -F '	' -v wanted="$role" '
+    $1 == wanted { print $2, $3; exit }
+  ')
   read -r count median <<EOF
 $history
 EOF
   [ "${count:-0}" -ge 3 ] || return
+  [ "$elapsed" -ge 60 ] || return
   [ "$elapsed" -gt $((2 * median)) ] || return
   minutes=$(awk -v seconds="$median" 'BEGIN {
     value = seconds / 60
@@ -39,7 +42,7 @@ EOF
 }
 
 printf '%-28s %-9s %3s %4s %6s %4s  %s\n' CARD STATE TRY RC MIN GIT WORKER
-for task in "$orka"/tasks/${1:-*}.md; do
+for task in "$orka"/tasks/$task_filter.md; do
   [ -f "$task" ] || continue
   card=$(basename "$task" .md)
   n=$(ls "$orka/runs/$card" 2>/dev/null | sed -n 's/^attempt-//p' | sort -n | tail -1)

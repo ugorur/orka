@@ -20,7 +20,7 @@ for f in "$orka"/runs/*/attempt-*/pending; do
 done
 
 mkdir -p "$orka"/{bin/workers,tasks,runs,env,templates}
-cp "$skill"/scripts/{orka,run.sh,finish.sh,queue.sh,status.sh,score.sh,lib.sh,rules.md} "$orka/bin/"
+cp "$skill"/scripts/{orka,run.sh,finish.sh,queue.sh,status.sh,score.sh,prune.sh,lib.sh,rules.md} "$orka/bin/"
 cp "$skill"/scripts/workers/*.sh "$orka/bin/workers/"   # custom adapters you added are kept
 # Templates: the project may have edited them. .base/ keeps the skill version from the last init,
 # so unedited files update silently, edited ones get a 3-way merge, and only real conflicts go to

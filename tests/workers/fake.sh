@@ -2,8 +2,15 @@
 # Test-only Orka worker adapter: no model, just proves the plumbing.
 # Writes a file in the worktree, commits it, and reports what it saw. ORKA_FAKE_* knobs:
 # SLEEP seconds, RC exit code, LEAK text appended to the report, TRACE dir to detect overlapping workers,
-# BADUSAGE=<text> writes it as usage.json, TRAP=1 exits 0 on TERM, STUBBORN=1 leaves a child that ignores TERM.
+# BADUSAGE=<text> writes it as usage.json, TRAP=1 exits 0 on TERM, STUBBORN=1 leaves a child that ignores TERM,
+# BADMODEL=<model> rejects that model, FAIL=1 fails normally, CALLS=<file> records each attempted model.
 cd "$ORKA_WT" || exit 1
+[ -n "${ORKA_FAKE_CALLS:-}" ] && printf '%s\n' "$ORKA_MODEL" >> "$ORKA_FAKE_CALLS"
+if [ -n "${ORKA_FAKE_BADMODEL:-}" ] && [ "$ORKA_MODEL" = "$ORKA_FAKE_BADMODEL" ]; then
+  echo "error: model '$ORKA_MODEL' is not supported" >&2
+  exit 1
+fi
+[ -z "${ORKA_FAKE_FAIL:-}" ] || { echo "error: ordinary worker failure" >&2; exit 1; }
 if [ -n "${ORKA_FAKE_TRACE:-}" ]; then # a directory: one file per live worker; note any overlap
   mkdir -p "$ORKA_FAKE_TRACE" && touch "$ORKA_FAKE_TRACE/$$"
   set -- "$ORKA_FAKE_TRACE"/[0-9]*

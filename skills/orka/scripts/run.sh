@@ -24,15 +24,47 @@ card=$1
 task="$orka/tasks/$card.md"
 [ -f "$task" ] || die "missing card $task"
 
+role_run=0
+fallback_model=
 if jq -e --arg r "$2" '.team[$r]' "$conf" >/dev/null 2>&1; then
+  role_run=1
   role=$2
   cli=$(jq -r --arg r "$role" '.team[$r].cli' "$conf")
   model=$(jq -r --arg r "$role" '.team[$r].model // ""' "$conf")
   effort=$(jq -r --arg r "$role" '.team[$r].effort // ""' "$conf")
+  fallback_model=$(jq -r --arg r "$role" '.team[$r].fallbackModel // ""' "$conf")
   wt=${3:-}
 else
   [ $# -ge 4 ] || die "'$2' is not a role in orka.json; explicit form needs <cli> <model> <effort>"
   role=custom cli=$2 model=$3 effort=$4 wt=${5:-}
+fi
+
+if [ "${ORKA_BUDGET+x}" = x ]; then
+  budget=$ORKA_BUDGET
+else
+  jq -e '(.budget // 0) | type == "number" and . >= 0 and floor == .' "$conf" >/dev/null 2>&1 \
+    || die "budget must be an integer >= 0"
+  budget=$(jq -r '.budget // 0' "$conf")
+fi
+case $budget in ''|*[!0-9]*) die "budget must be an integer >= 0" ;; esac
+budget=$(awk -v n="$budget" 'BEGIN {printf "%.0f", n}')
+
+if [ "$role_run" -eq 1 ] && [ "$effort" != minimal ]; then
+  original_effort=$effort
+  steps=0
+  while [ "$steps" -lt "$budget" ]; do
+    case $effort in
+      max) effort=xhigh ;;
+      xhigh) effort=high ;;
+      high) effort=medium ;;
+      medium) effort=low ;;
+      low) break ;;
+      *) break ;;
+    esac
+    steps=$((steps + 1))
+  done
+  [ "$effort" = "$original_effort" ] \
+    || echo "orka: budget $budget: $role effort $original_effort -> $effort" >&2
 fi
 adapter="$orka/bin/workers/$cli.sh"
 [ "$cli" = subagent ] || [ -x "$adapter" ] || die "no worker adapter $adapter"
@@ -111,7 +143,7 @@ if [ "$cli" = subagent ]; then
 fi
 
 start=$(date +%s)
-echo "$$ $start" > "$a/running"
+echo "$$ $start $role" > "$a/running"
 
 slot=${card%%-*}
 envf="$orka/env/$slot.env"
@@ -155,26 +187,69 @@ cliv=$(command -v "$cli" >/dev/null && "$cli" --version 2>/dev/null < /dev/null 
 # its session id and messaging socket/token to child processes).
 unset CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_EXECPATH \
   CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PID CLAUDE_EFFORT
-# timeout runs the worker in its own process group and passes signals on to the whole group,
-# so stopping this runner (TERM/INT/HUP) stops the worker too, and we still write meta.json.
-ORKA_WT=$wt ORKA_MODEL=$model ORKA_EFFORT=$effort ORKA_PROMPT="$a/prompt.md" ORKA_OUT=$a \
-  "$tbin" --kill-after=60 "${timeout_min}m" bash "$adapter" < /dev/null 2> "$a/err.txt" &
-wpid=$!
 stopped=0
-trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
-# A signal interrupts `wait`; keep waiting until the worker group is really gone.
-while :; do wait $wpid; rc=$?; kill -0 $wpid 2>/dev/null || break; done
-# Whatever is left in the worker's process group (children that ignored TERM) goes too,
-# before the lock and running marker are released.
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-  kill -0 -- -"$wpid" 2>/dev/null || break
-  kill -TERM -- -"$wpid" 2>/dev/null; sleep 1
-done
-kill -KILL -- -"$wpid" 2>/dev/null
-[ $stopped = 1 ] && [ $rc -eq 0 ] && rc=143   # a cancelled run never counts as success
+wpid=
+run_adapter() {
+  # timeout runs the worker in its own process group and passes signals on to the whole group,
+  # so stopping this runner (TERM/INT/HUP) stops the worker too, and we still write meta.json.
+  ORKA_WT=$wt ORKA_MODEL=$model ORKA_EFFORT=$effort ORKA_PROMPT="$a/prompt.md" ORKA_OUT=$a \
+    "$tbin" --kill-after=60 "${timeout_min}m" bash "$adapter" < /dev/null 2> "$a/err.txt" &
+  wpid=$!
+  trap 'kill -TERM $wpid 2>/dev/null; stopped=1' TERM INT HUP
+  # A signal interrupts `wait`; keep waiting until the worker group is really gone.
+  while :; do wait $wpid; rc=$?; kill -0 $wpid 2>/dev/null || break; done
+  # Whatever is left in the worker's process group (children that ignored TERM) goes too,
+  # before the lock and running marker are released.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 -- -"$wpid" 2>/dev/null || break
+    kill -TERM -- -"$wpid" 2>/dev/null; sleep 1
+  done
+  kill -KILL -- -"$wpid" 2>/dev/null
+  [ "$stopped" -eq 1 ] && [ "$rc" -eq 0 ] && rc=143
+}
+
+model_rejection() {
+  local f
+  for f in "$a/err.txt" "$a"/log*; do
+    [ -f "$f" ] || continue
+    awk '{
+      line = tolower($0)
+      if (line ~ /model/ && line ~ /(not found|not supported|unsupported|does not exist|invalid|unknown|not available|no access|not allowed)/) {
+        print substr($0, 1, 200)
+        exit
+      }
+    }' "$f"
+  done | awk 'NR == 1 {print; exit}'
+}
+
+fallback_used=0
+fallback_from=
+fallback_reason=
+run_adapter
 end=$(date +%s)
 after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
 commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)
+
+if [ "$role_run" -eq 1 ] && [ "$rc" -ne 0 ] && [ "${commits:-0}" -eq 0 ] \
+   && [ $((end - start)) -le 120 ] && [ -n "$model" ] && [ "$model" != "$fallback_model" ]; then
+  fallback_reason=$(model_rejection)
+  if [ -n "$fallback_reason" ]; then
+    fallback_used=1
+    fallback_from=$model
+    if [ -n "$fallback_model" ]; then fallback_label=$fallback_model; else fallback_label="the CLI default"; fi
+    fallback_message="orka: $cli rejected model $model; retrying with $fallback_label"
+    echo "$fallback_message" >&2
+    echo "$fallback_message" >> "$a/fallback.txt"
+    mv "$a/err.txt" "$a/err.first.txt"
+    rm -f "$a/report.txt" "$a/usage.json"
+    model=$fallback_model
+    run_adapter
+    end=$(date +%s)
+    after=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
+    commits=$(git -C "$wt" rev-list --count "$before..$after" 2>/dev/null || echo 0)
+  fi
+fi
+
 usage=null
 jq -se 'length == 1 and (.[0] | type == "object")' "$a/usage.json" >/dev/null 2>&1 && usage=$(jq -c '.' "$a/usage.json")
 timed_out=0
@@ -182,6 +257,12 @@ timed_out=0
 orka_write_meta "$a/meta.json" "$card" "$cliv" "$role" "$cli" "$model" "$effort" "$wt" \
   "$before" "$after" "$n" "$rc" "$((end - start))" "$start" "${commits:-0}" "$usage" "$stopped" "$timed_out" \
   || { echo "orka: could not write $a/meta.json" >&2; [ "$rc" -eq 0 ] && rc=70; }
+[ "$fallback_used" -eq 0 ] || {
+  jq --arg from "$fallback_from" --arg reason "$fallback_reason" \
+    '. + {modelFallback:{from:$from, reason:$reason}}' "$a/meta.json" > "$a/meta.json.tmp" \
+    && mv "$a/meta.json.tmp" "$a/meta.json" \
+    || { echo "orka: could not record model fallback in $a/meta.json" >&2; [ "$rc" -eq 0 ] && rc=70; }
+}
 # The orchestrator reads reports; mask obvious secrets a worker may have echoed.
 # ponytail: pattern-based, catches KEY=value / Bearer / sk- style only; not a DLP.
 [ -f "$a/report.txt" ] && orka_mask_report "$a/report.txt"

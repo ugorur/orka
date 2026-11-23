@@ -140,17 +140,21 @@ In a git project, tell your agent:
    ```json
    {
      "team": {
-       "lead":   { "cli": "codex",  "model": "gpt-6-astra", "effort": "high" },
+       "lead":   { "cli": "codex",  "model": "gpt-6-astra", "fallbackModel": "gpt-5.6-sol", "effort": "high" },
        "senior": { "cli": "codex",  "model": "gpt-5.6-sol", "effort": "high" },
        "mid":    { "cli": "grok",   "model": "grok-4.7",    "effort": "medium" },
        "junior": { "cli": "codex",  "model": "gpt-6-luna",  "effort": "medium" }
      },
      "parallel": 2,
      "timeoutMinutes": 120,
+     "budget": 0,
+     "reviewRounds": 2,
      "worktreeDir": "../myproject-wt",
      "autoMerge": false
    }
    ```
+
+   `parallel` limits concurrent workers, `timeoutMinutes` limits each CLI run, `worktreeDir` holds linked worktrees, and `autoMerge` lets the orchestrator merge without asking. `budget` lowers every role's configured effort by that many steps (`minimal low medium high xhigh max`, stopping at `low`; `ORKA_BUDGET` overrides it). A role's optional `fallbackModel` is retried once when its CLI quickly rejects the configured model; omit it to retry with that CLI's default. `reviewRounds` tells the orchestrator how many lead review rounds to run per change (default 2); the runner scripts do not read it.
 
    **Smallest setup:** one CLI you already use, at different price points. In Claude Code on a subscription, all four roles can use `"cli": "subagent"`, with `opus` as lead, `sonnet` as senior and mid, and `haiku` as junior. Or use one headless CLI for every role. You can add other vendors later; a lead from a different vendor than the author gives the best reviews. Headless `claude -p` workers are for API-key or gateway setups.
 
@@ -179,7 +183,8 @@ The orchestrator calls these; you rarely need to, but they are plain bash and ea
 | `orka run <card> <cli> <model> <effort> [worktree]` | Same, with a one-off worker |
 | `orka finish <card> [exit-code]` | Finish a prepared native sub-agent attempt; use `--abandon` after a crash |
 | `orka queue "<card> <role>" …` | Run many cards, at most `parallel` at once (no spaces in worktree paths) |
-| `orka status` | Every card: todo · running · done · failed · timeout · stopped, minutes, commits, worker |
+| `orka status` | Every card: todo · running · done · failed · timeout · stopped, minutes, commits, worker; unusually long role runs are marked `SLOW` |
+| `orka prune [--dry-run]` | Remove only merged, clean, unused Orka worktrees and their merged branches; list why every other candidate is kept |
 | `orka score <card> predicted\|actual …` | Log a score; `actual` also copies worker, time and usage (tokens / $) from the run |
 | `orka score --summary` | Average scores per worker/model, which the orchestrator reads before assigning |
 
@@ -257,7 +262,7 @@ Then use `"cli": "mycli"` in `orka.json`. The runner handles the worktree, promp
 
 **What does it cost?** Only what your worker CLIs cost. Real examples from the ledger: a lead review, about 6 minutes (median of 348) and a few hundred thousand mostly-cached tokens; a senior feature card spanning contract → API → admin → mobile, 20–50+ minutes; a Grok run, median $3.22 and at most $10.40 (83 runs). `orka score --summary` shows your own numbers.
 
-**Is this a framework?** No. It's a skill (a markdown playbook) plus about 300 lines of bash. No daemon, no server, no database, no Node/Python runtime.
+**Is this a framework?** No. It's a skill (a markdown playbook) plus about 800 lines of bash. No daemon, no server, no database, no Node/Python runtime.
 
 ## Status
 

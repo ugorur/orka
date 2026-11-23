@@ -11,4 +11,4 @@ Answer briefly:
 4. Acceptance: did the orchestrator verify independently, or trust a worker's claim?
 5. Mistakes: tooling errors, lost time, risky actions.
 6. Scores for the orchestrator: smart / dumb / speed / cost (0-100, dumb = worst silly mistake).
-7. The 1-3 concrete rules the orchestrator should follow from now on.
+7. The 1-3 concrete rules the orchestrator should follow from now on. For each, what script, lint, test or check could enforce it instead of more text?

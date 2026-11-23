@@ -8,7 +8,7 @@
 - If `.orka/verify.md` exists, QA launches and drives the app from it. A QA card can write that guide; it counts only after one QA run has worked from it.
 - Pausing mid-work commits unfinished edits as one `wip:` commit and writes `.orka/RESUME.md`. Pickup starts from that file and checks its claims against the repo.
 - Optional `budget` (or `ORKA_BUDGET`) lowers every role's effort by N steps, never below `low`. Explicit one-off runs are not lowered.
-- `orka prune [--dry-run]` removes worktrees that are merged, clean, and not in use, and lists the rest with the reason.
+- `orka prune [--dry-run]` removes worktrees that are merged, clean, and not in use, and lists the rest with the reason. Ignored files it deletes with a worktree (`node_modules/`, `.env`, …) are listed too.
 - `orka status` flags a running card `SLOW` when it has run more than twice its role's median (after 3 finished runs of that role). Look at the log; do not kill it for that alone.
 - After a rebase, the same `git patch-id` means the review still stands. A different patch-id gets acceptance re-run and a lead check of the delta only.
 - Perf cards measure a baseline first, report the median of 5 or more alternating runs, change one thing at a time, and keep a change only when the number moves.
